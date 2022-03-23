@@ -89,7 +89,7 @@ type HvsockAddr struct {
 }
 
 type rawHvsockAddr struct {
-	Family    uint16
+	sockets.RawSockaddrHeader
 	_         uint16
 	VMID      guid.GUID
 	ServiceID guid.GUID
@@ -115,7 +115,9 @@ func VsockServiceID(port uint32) guid.GUID {
 
 func (addr *HvsockAddr) raw() rawHvsockAddr {
 	return rawHvsockAddr{
-		Family:    afHvSock,
+		RawSockaddrHeader: sockets.RawSockaddrHeader{
+			Family: afHvSock,
+		},
 		VMID:      addr.VMID,
 		ServiceID: addr.ServiceID,
 	}

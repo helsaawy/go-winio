@@ -1,4 +1,4 @@
-//go:build windows
+//go:build go1.18
 
 package sockets
 
@@ -36,56 +36,22 @@ type CloseReader interface {
 // GetSockName returns the socket's local address. It will call the `rsa.FromBytes()` on the
 // buffer returned by the getsockname syscall. The buffer is allocated to the size specified
 // by `rsa.Sockaddr()`.
-func GetSockName(s windows.Handle, rsa RawSockaddr) error {
-	// todo: replace this (and RawSockaddr) with generics
-	ptr, l, err := rsa.Sockaddr()
-	if err != nil {
-		return fmt.Errorf("could not find socket size to allocate buffer: %w", err)
-	}
-	if err = validateSockAddr(ptr, l); err != nil {
-		return err
-	}
-
-	b := make([]byte, l)
-	err = getsockname(s, unsafe.Pointer(&b[0]), &l)
-	if err != nil {
-		// although getsockname returns WSAEFAULT if the buffer is too small, it does not set
-		// &l to the correct size, so--apart from doubling the buffer repeatedly--there is no remedy
-		return err
-	}
-	return rsa.FromBytes(b[:l])
+func GetSockName[T RawSockaddr](s windows.Handle, rsa *T) error {
+	l := int32(unsafe.Sizeof(*rsa))
+	return getsockname(s, unsafe.Pointer(rsa), &l)
 }
 
 // GetPeerName returns the remote address the socket is connected to.
 //
 // See GetSockName for more information.
-func GetPeerName(s windows.Handle, rsa RawSockaddr) error {
-	ptr, l, err := rsa.Sockaddr()
-	if err != nil {
-		return fmt.Errorf("could not find socket size to allocate buffer: %w", err)
-	}
-	if err = validateSockAddr(ptr, l); err != nil {
-		return err
-	}
-
-	b := make([]byte, l)
-	err = getpeername(s, unsafe.Pointer(&b[0]), &l)
-	if err != nil {
-		return err
-	}
-	return rsa.FromBytes(b[:l])
+func GetPeerName[T RawSockaddr](s windows.Handle, rsa *T) error {
+	l := int32(unsafe.Sizeof(*rsa))
+	return getpeername(s, unsafe.Pointer(rsa), &l)
 }
 
-func Bind(s windows.Handle, rsa RawSockaddr) (err error) {
-	ptr, l, err := rsa.Sockaddr()
-	if err != nil {
-		return fmt.Errorf("could not find socket pointer and size: %w", err)
-	}
-	if err = validateSockAddr(ptr, l); err != nil {
-		return err
-	}
-
-	return bind(s, ptr, l)
+func Bind[T RawSockaddr](s windows.Handle, rsa *T) (err error) {
+	l := int32(unsafe.Sizeof(*rsa))
+	return bind(s, unsafe.Pointer(rsa), l)
 }
 
 // "golang.org/x/sys/windows".ConnectEx and .Bind only accept internal implementations of the
@@ -141,16 +107,12 @@ var (
 	connectExFunc = runtimeFunc{id: WSAID_CONNECTEX}
 )
 
-func ConnectEx(fd windows.Handle, rsa RawSockaddr, sendBuf *byte, sendDataLen uint32, bytesSent *uint32, overlapped *windows.Overlapped) error {
+func ConnectEx[T RawSockaddr](fd windows.Handle, rsa *T, sendBuf *byte, sendDataLen uint32, bytesSent *uint32, overlapped *windows.Overlapped) error {
 	err := connectExFunc.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load ConnectEx function pointer: %e", err)
 	}
-	ptr, n, err := rsa.Sockaddr()
-	if err != nil {
-		return err
-	}
-	return connectEx(fd, ptr, n, sendBuf, sendDataLen, bytesSent, overlapped)
+	return connectEx(fd, unsafe.Pointer(rsa), int32(unsafe.Sizeof(*rsa)), sendBuf, sendDataLen, bytesSent, overlapped)
 }
 
 // BOOL LpfnConnectex(
@@ -163,7 +125,7 @@ func ConnectEx(fd windows.Handle, rsa RawSockaddr, sendBuf *byte, sendDataLen ui
 //   [in]           LPOVERLAPPED lpOverlapped
 // )
 func connectEx(s windows.Handle, name unsafe.Pointer, namelen int32, sendBuf *byte, sendDataLen uint32, bytesSent *uint32, overlapped *windows.Overlapped) (err error) {
-	r1, _, e1 := syscall.Syscall9(connectExFunc.addr, 7, uintptr(s), uintptr(name), uintptr(namelen), uintptr(unsafe.Pointer(sendBuf)), uintptr(sendDataLen), uintptr(unsafe.Pointer(bytesSent)), uintptr(unsafe.Pointer(overlapped)), 0, 0)
+	r1, _, e1 := syscall.SyscallN(connectExFunc.addr, 7, uintptr(s), uintptr(name), uintptr(namelen), uintptr(unsafe.Pointer(sendBuf)), uintptr(sendDataLen), uintptr(unsafe.Pointer(bytesSent)), uintptr(unsafe.Pointer(overlapped)), 0, 0)
 	if r1 == 0 {
 		if e1 != 0 {
 			err = error(e1)

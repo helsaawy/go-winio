@@ -21,66 +21,79 @@ import (
 
 const afHvSock = 34 // AF_HYPERV
 
-var (
-	// https://docs.microsoft.com/en-us/virtualization/hyper-v-on-windows/user-guide/make-integration-service#vmid-wildcards
+// Well know Service and VM IDs
+//https://docs.microsoft.com/en-us/virtualization/hyper-v-on-windows/user-guide/make-integration-service#vmid-wildcards
 
-	// HVguidWildcard is the wildcard VmId for accepting connections from all partitions.
-	HVguidWildcard = guid.GUID{} // 00000000-0000-0000-0000-000000000000
+// HvsockGUIDWildcard is the wildcard VmId for accepting connections from all partitions.
+func HvsockGUIDWildcard() guid.GUID { // 00000000-0000-0000-0000-000000000000
+	return guid.GUID{}
+}
 
-	// HVguidBroadcast is the wildcard VmId for broadcasting sends to all partitions
-	HVguidBroadcast = guid.GUID{ //ffffffff-ffff-ffff-ffff-ffffffffffff
+// HvsockGUIDBroadcast is the wildcard VmId for broadcasting sends to all partitions
+func HvsockGUIDBroadcast() guid.GUID { //ffffffff-ffff-ffff-ffff-ffffffffffff
+	return guid.GUID{
 		Data1: 0xffffffff,
 		Data2: 0xffff,
 		Data3: 0xffff,
 		Data4: [8]uint8{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
 	}
+}
 
-	// HVGUIDLoopback is the Loopback VmId for accepting connections to the same partition as the connector.
-	HVguidLoopback = guid.GUID{ // e0e16197-dd56-4a10-9195-5ee7a155a838
+// HvsockGUIDLoopback is the Loopback VmId for accepting connections to the same partition as the connector.
+func HvsockGUIDLoopback() guid.GUID { // e0e16197-dd56-4a10-9195-5ee7a155a838
+	return guid.GUID{
 		Data1: 0xe0e16197,
 		Data2: 0xdd56,
 		Data3: 0x4a10,
 		Data4: [8]uint8{0x91, 0x95, 0x5e, 0xe7, 0xa1, 0x55, 0xa8, 0x38},
 	}
+}
 
-	// HVguidSiloHost is the address of a silo's host partition:
-	// - The silo host of a hosted silo is the utility VM.
-	// - The silo host of a silo on a physical host is the physical host.
-	HVguidSiloHost = guid.GUID{ // 36bd0c5c-7276-4223-88ba-7d03b654c568
+// HvsockGUIDSiloHost is the address of a silo's host partition:
+// - The silo host of a hosted silo is the utility VM.
+// - The silo host of a silo on a physical host is the physical host.
+func HvsockGUIDSiloHost() guid.GUID { // 36bd0c5c-7276-4223-88ba-7d03b654c568
+	return guid.GUID{
 		Data1: 0x36bd0c5c,
 		Data2: 0x7276,
 		Data3: 0x4223,
 		Data4: [8]byte{0x88, 0xba, 0x7d, 0x03, 0xb6, 0x54, 0xc5, 0x68},
 	}
+}
 
-	// HVguidChildren is the wildcard VmId for accepting connections from the connector's child partitions.
-	HVguidChildren = guid.GUID{ // 90db8b89-0d35-4f79-8ce9-49ea0ac8b7cd
+// HvsockGUIDChildren is the wildcard VmId for accepting connections from the connector's child partitions.
+func HvsockGUIDChildren() guid.GUID { // 90db8b89-0d35-4f79-8ce9-49ea0ac8b7cd
+	return guid.GUID{
 		Data1: 0x90db8b89,
 		Data2: 0xd35,
 		Data3: 0x4f79,
 		Data4: [8]uint8{0x8c, 0xe9, 0x49, 0xea, 0xa, 0xc8, 0xb7, 0xcd},
 	}
+}
 
-	// HVguidParent is the wildcard VmId for accepting connections from the connector's parent partition.
-	// Listening on this VmId accepts connection from:
-	// - Inside silos: silo host partition.
-	// - Inside hosted silo: host of the VM.
-	// - Inside VM: VM host.
-	// - Physical host: Not supported.
-	HVguidParent = guid.GUID{ // a42e7cda-d03f-480c-9cc2-a4de20abb878
+// HvsockGUIDParent is the wildcard VmId for accepting connections from the connector's parent partition.
+// Listening on this VmId accepts connection from:
+// - Inside silos: silo host partition.
+// - Inside hosted silo: host of the VM.
+// - Inside VM: VM host.
+// - Physical host: Not supported.
+func HvsockGUIDParent() guid.GUID { // a42e7cda-d03f-480c-9cc2-a4de20abb878
+	return guid.GUID{
 		Data1: 0xa42e7cda,
 		Data2: 0xd03f,
 		Data3: 0x480c,
 		Data4: [8]uint8{0x9c, 0xc2, 0xa4, 0xde, 0x20, 0xab, 0xb8, 0x78},
 	}
+}
 
-	// HVguidVSockServiceGUIDTemplate is the Service GUID used for the VSOCK protocol
-	hvguidVSockServiceTemplate = guid.GUID{ // 00000000-facb-11e6-bd58-64006a7986d3
+// HVguidVSockServiceGUIDTemplate is the Service GUID used for the VSOCK protocol
+func hvsockVsockServiceTemplate() guid.GUID { // 00000000-facb-11e6-bd58-64006a7986d3
+	return guid.GUID{
 		Data2: 0xfacb,
 		Data3: 0x11e6,
 		Data4: [8]uint8{0xbd, 0x58, 0x64, 0x00, 0x6a, 0x79, 0x86, 0xd3},
 	}
-)
+}
 
 // An HvsockAddr is an address for a AF_HYPERV socket.
 type HvsockAddr struct {
@@ -108,7 +121,7 @@ func (addr *HvsockAddr) String() string {
 
 // VsockServiceID returns an hvsock service ID corresponding to the specified AF_VSOCK port.
 func VsockServiceID(port uint32) guid.GUID {
-	g := hvguidVSockServiceTemplate // make a copy
+	g := hvsockVsockServiceTemplate() // make a copy
 	g.Data1 = port
 	return g
 }

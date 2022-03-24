@@ -14,33 +14,7 @@ var (
 	ErrAddrFamily     = errors.New("address family")
 )
 
-// todo: replace this with generics
-// The function calls should be:
-//
-//   type RawSockaddrHeader {
-//   	Family uint16
-//   }
-//
-//   func ConnectEx[T ~RawSockaddrHeader] (s Handle, a *T, ...) error {
-//   	n := unsafe.SizeOf(*a)
-//   	r1, _, e1 := syscall.Syscall9(connectExFunc.addr, 7, uintptr(s),
-//  		uintptr(unsafe.Pointer(a)), uintptr(n), /* ... */)
-//   	/* ... */
-//   }
-//
-// Similarly, `GetAcceptExSockaddrs` requires a `**sockaddr`, so the syscall can change the pointer
-// to data it allocates. Currently, the options are (1) dealing with pointers to the interface
-// `* RawSockaddr`, use reflection or pull the pointer from the internal interface representation,
-// and change where the interface points to; or (2) allocate dedicate, presized buffers based on
-// `(r RawSockaddr).Sockaddr()`'s return, and pass that to `(r RawSockaddr).FromBytes()`.
-// It would be safer and more readable to have:
-//
-//  	func GetAcceptExSockaddrs[L ~RawSockaddrHeader, R ~RawSockaddrHeader](
-//  		b *byte,
-//  		rxlen uint32,
-//  		local **L,
-//  		remote **R,
-//  	) error { /*...*/ }
+// todo: replace this with generics, along with GetSockName and co.
 
 // RawSockaddr allows structs to be used with Bind and ConnectEx. The
 // struct must meet the Wind32 sockaddr requirements specified here:

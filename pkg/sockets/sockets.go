@@ -37,7 +37,6 @@ type CloseReader interface {
 // buffer returned by the getsockname syscall. The buffer is allocated to the size specified
 // by `rsa.Sockaddr()`.
 func GetSockName(s windows.Handle, rsa RawSockaddr) error {
-	// todo: replace this (and RawSockaddr) with generics
 	ptr, l, err := rsa.Sockaddr()
 	if err != nil {
 		return fmt.Errorf("could not find socket size to allocate buffer: %w", err)

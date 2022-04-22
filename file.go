@@ -4,8 +4,9 @@
 package winio
 
 import (
-	"errors"
+	"fmt"
 	"io"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -38,7 +39,7 @@ const (
 )
 
 var (
-	ErrFileClosed = errors.New("file has already been closed")
+	ErrFileClosed = fmt.Errorf("file has already been closed: %w", os.ErrClosed)
 	ErrTimeout    = &timeoutError{}
 )
 
@@ -47,6 +48,12 @@ type timeoutError struct{}
 func (e *timeoutError) Error() string   { return "i/o timeout" }
 func (e *timeoutError) Timeout() bool   { return true }
 func (e *timeoutError) Temporary() bool { return true }
+
+// unwrap timeoutError into os.ErrDeadlineExceeded to allow comparison with errors.Is()/As()
+func (e *timeoutError) Unwrap() error {
+	// same as net.ErrDeadlineExceeded
+	return os.ErrDeadlineExceeded
+}
 
 type timeoutChan chan struct{}
 

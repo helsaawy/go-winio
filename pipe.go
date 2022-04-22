@@ -5,7 +5,6 @@ package winio
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -89,9 +88,9 @@ const (
 
 var (
 	// ErrPipeListenerClosed is returned for pipe operations on listeners that have been closed.
-	ErrPipeListenerClosed = net.ErrClosed
+	ErrPipeListenerClosed = net.ErrClosed // todo: should this also be io.ErrClosedPipe?
 
-	errPipeWriteClosed = errors.New("pipe has been closed for write")
+	errPipeWriteClosed = fmt.Errorf("pipe has been closed for write: %w", io.ErrClosedPipe)
 )
 
 type win32Pipe struct {

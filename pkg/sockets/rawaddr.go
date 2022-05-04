@@ -21,7 +21,7 @@ var (
 // https://docs.microsoft.com/en-us/windows/win32/winsock/sockaddr-2
 type RawSockaddr interface {
 	// Sockaddr returns a pointer to the RawSockaddr and the length of the struct.
-	Sockaddr() (ptr unsafe.Pointer, len int32, err error)
+	Sockaddr() (unsafe.Pointer, int32, error)
 
 	// FromBytes populates the RawsockAddr with the data in the byte array.
 	// Implementers should check the buffer is correctly sized and the address family
@@ -30,12 +30,12 @@ type RawSockaddr interface {
 	FromBytes([]byte) error
 }
 
-func validateSockAddr(ptr unsafe.Pointer, len int32) error {
+func validateSockAddr(ptr unsafe.Pointer, n int32) error {
 	if ptr == nil {
 		return fmt.Errorf("pointer is %p: %w", ptr, ErrInvalidPointer)
 	}
-	if len < 1 {
-		return fmt.Errorf("buffer size %d < 1: %w", len, ErrBufferSize)
+	if n < 1 {
+		return fmt.Errorf("buffer size %d < 1: %w", n, ErrBufferSize)
 	}
 	return nil
 }

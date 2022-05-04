@@ -21,6 +21,8 @@ import (
 
 const socketError = uintptr(^uint32(0))
 
+var ErrSocketClosed = fmt.Errorf("socket closed: %w", net.ErrClosed)
+
 // CloseWriter is a connection that can disable writing to itself.
 type CloseWriter interface {
 	net.Conn
@@ -125,7 +127,6 @@ func (f *runtimeFunc) Load() error {
 		)
 	})
 	return f.err
-
 }
 
 var (
@@ -141,9 +142,8 @@ var (
 )
 
 func ConnectEx(fd windows.Handle, rsa RawSockaddr, sendBuf *byte, sendDataLen uint32, bytesSent *uint32, overlapped *windows.Overlapped) error {
-	err := connectExFunc.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load ConnectEx function pointer: %e", err)
+	if err := connectExFunc.Load(); err != nil {
+		return fmt.Errorf("failed to load ConnectEx function pointer: %w", err)
 	}
 	ptr, n, err := rsa.Sockaddr()
 	if err != nil {

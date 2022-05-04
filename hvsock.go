@@ -5,6 +5,7 @@ package winio
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -437,6 +438,10 @@ func canRedial(err error) bool {
 }
 
 func (conn *HvsockConn) opErr(op string, err error) error {
+	// translate from "file closed" to "socket closed"
+	if errors.Is(err, ErrFileClosed) {
+		err = sockets.ErrSocketClosed
+	}
 	return &net.OpError{Op: op, Net: "hvsock", Source: &conn.local, Addr: &conn.remote, Err: err}
 }
 
@@ -451,8 +456,8 @@ func (conn *HvsockConn) Read(b []byte) (int, error) {
 	err = syscall.WSARecv(conn.sock.handle, &buf, 1, &bytes, &flags, &c.o, nil)
 	n, err := conn.sock.asyncIo(c, &conn.sock.readDeadline, bytes, err)
 	if err != nil {
-		if _, ok := err.(syscall.Errno); ok {
-			err = os.NewSyscallError("wsarecv", err)
+		if eno := windows.Errno(0); errors.As(err, &eno) {
+			err = os.NewSyscallError("wsarecv", eno)
 		}
 		return 0, conn.opErr("read", err)
 	} else if n == 0 {
@@ -485,8 +490,8 @@ func (conn *HvsockConn) write(b []byte) (int, error) {
 	err = syscall.WSASend(conn.sock.handle, &buf, 1, &bytes, 0, &c.o, nil)
 	n, err := conn.sock.asyncIo(c, &conn.sock.writeDeadline, bytes, err)
 	if err != nil {
-		if _, ok := err.(syscall.Errno); ok {
-			err = os.NewSyscallError("wsasend", err)
+		if eno := windows.Errno(0); errors.As(err, &eno) {
+			err = os.NewSyscallError("wsasend", eno)
 		}
 		return 0, conn.opErr("write", err)
 	}
@@ -505,11 +510,16 @@ func (conn *HvsockConn) IsClosed() bool {
 // shutdown disables sending or receiving on a socket
 func (conn *HvsockConn) shutdown(how int) error {
 	if conn.IsClosed() {
-		return ErrFileClosed
+		return sockets.ErrSocketClosed
 	}
 
 	err := syscall.Shutdown(conn.sock.handle, how)
 	if err != nil {
+		// If the connection was closed, shutdowns fail with "not connected"
+		if errors.Is(err, windows.WSAENOTCONN) ||
+			errors.Is(err, windows.WSAESHUTDOWN) {
+			err = sockets.ErrSocketClosed
+		}
 		return os.NewSyscallError("shutdown", err)
 	}
 	return nil

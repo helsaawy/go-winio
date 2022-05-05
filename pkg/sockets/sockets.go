@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/Microsoft/go-winio/pkg/guid"
+	"github.com/Microsoft/go-winio/pkg/proc"
 	"golang.org/x/sys/windows"
 )
 
@@ -131,19 +132,19 @@ func (f *runtimeFunc) Load() error {
 
 var (
 	// todo: add `AcceptEx` and `GetAcceptExSockaddrs`
-	WSAID_CONNECTEX = guid.GUID{
+	_WSAID_CONNECTEX = guid.GUID{
 		Data1: 0x25a207b9,
 		Data2: 0xddf3,
 		Data3: 0x4660,
 		Data4: [8]byte{0x8e, 0xe9, 0x76, 0xe5, 0x8c, 0x74, 0x06, 0x3e},
 	}
 
-	connectExFunc = runtimeFunc{id: WSAID_CONNECTEX}
+	connectExFunc = proc.NewWSAIoctlFunc("ConnectEx", _WSAID_CONNECTEX)
 )
 
 func ConnectEx(fd windows.Handle, rsa RawSockaddr, sendBuf *byte, sendDataLen uint32, bytesSent *uint32, overlapped *windows.Overlapped) error {
-	if err := connectExFunc.Load(); err != nil {
-		return fmt.Errorf("failed to load ConnectEx function pointer: %w", err)
+	if err := connectExFunc.Find(); err != nil {
+		return err
 	}
 	ptr, n, err := rsa.Sockaddr()
 	if err != nil {
@@ -162,7 +163,9 @@ func ConnectEx(fd windows.Handle, rsa RawSockaddr, sendBuf *byte, sendDataLen ui
 //   [in]           LPOVERLAPPED lpOverlapped
 // )
 func connectEx(s windows.Handle, name unsafe.Pointer, namelen int32, sendBuf *byte, sendDataLen uint32, bytesSent *uint32, overlapped *windows.Overlapped) (err error) {
-	r1, _, e1 := syscall.Syscall9(connectExFunc.addr, 7, uintptr(s), uintptr(name), uintptr(namelen), uintptr(unsafe.Pointer(sendBuf)), uintptr(sendDataLen), uintptr(unsafe.Pointer(bytesSent)), uintptr(unsafe.Pointer(overlapped)), 0, 0)
+	r1, _, err1 := connectExFunc.Call(uintptr(s), uintptr(name), uintptr(namelen), uintptr(unsafe.Pointer(sendBuf)), uintptr(sendDataLen), uintptr(unsafe.Pointer(bytesSent)), uintptr(unsafe.Pointer(overlapped)))
+	// syscall should return Errno as default
+	e1 := err1.(windows.Errno) //nolint:errorlint
 	if r1 == 0 {
 		if e1 != 0 {
 			err = error(e1)

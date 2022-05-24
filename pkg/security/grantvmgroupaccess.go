@@ -1,3 +1,4 @@
+//go:build windows
 // +build windows
 
 package security
@@ -7,6 +8,8 @@ import (
 	"os"
 	"syscall"
 	"unsafe"
+
+	"github.com/Microsoft/go-winio/internal/kernel"
 )
 
 type (
@@ -89,7 +92,7 @@ func GrantVmGroupAccess(name string) error {
 	if err := getSecurityInfo(fd, uint32(ot), uint32(si), nil, nil, &origDACL, nil, &sd); err != nil {
 		return fmt.Errorf("%s GetSecurityInfo %s: %w", gvmga, name, err)
 	}
-	defer syscall.LocalFree((syscall.Handle)(unsafe.Pointer(sd)))
+	defer kernel.LocalFree(sd)
 
 	// Generate a new DACL which is the current DACL with the required ACEs added.
 	// Must defer LocalFree on success.
@@ -97,7 +100,7 @@ func GrantVmGroupAccess(name string) error {
 	if err != nil {
 		return err // Already wrapped
 	}
-	defer syscall.LocalFree((syscall.Handle)(unsafe.Pointer(newDACL)))
+	defer kernel.LocalFree(newDACL)
 
 	// And finally use SetSecurityInfo to apply the updated DACL.
 	if err := setSecurityInfo(fd, uint32(ot), uint32(si), uintptr(0), uintptr(0), newDACL, uintptr(0)); err != nil {

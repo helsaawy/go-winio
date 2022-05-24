@@ -33,10 +33,30 @@ var (
 	filename       = flag.String("output", "", "output file name (standard output if omitted)")
 	printTraceFlag = flag.Bool("trace", false, "generate print statement after every syscall")
 	systemDLL      = flag.Bool("systemdll", true, "whether all DLLs should be loaded from the Windows system directory")
-	winio          = flag.Bool("winio", false, `import this package ("github.com/Microsoft/go-winio")`)
+	winio          = flag.Bool("winio", false, `import this package ["github.com/Microsoft/go-winio"]`)
 	utf16          = flag.Bool("utf16", true, "encode string arguments as UTF-16 for syscalls not ending in 'A' or 'W'")
 	sortdecls      = flag.Bool("sort", true, "sort DLL and function declarations")
 )
+
+// add a little capacity from the start
+var extraImports = make([]string, 0, 3)
+
+func init() {
+	flag.Usage = usage
+
+	flag.Func("import", "additional packages to import; can be specified multiple times, or separated by commas", func(s string) error {
+		for _, pkg := range strings.Split(s, ",") {
+			extraImports = append(extraImports, pkg)
+		}
+		return nil
+	})
+}
+
+func usage() {
+	fmt.Fprintf(os.Stderr, "usage: mkwinsyscall [flags] [path ...]\n")
+	flag.PrintDefaults()
+	os.Exit(1)
+}
 
 func trim(s string) string {
 	return strings.Trim(s, " \t")
@@ -650,6 +670,11 @@ func (src *Source) ExternalImport(pkg string) {
 	sort.Strings(src.ExternalImports)
 }
 
+func (src *Source) AppendExternalImport(pkgs []string) {
+	src.ExternalImports = append(src.ExternalImports, pkgs...)
+	sort.Strings(src.ExternalImports)
+}
+
 // ParseFiles parses files listed in fs and extracts all syscall
 // functions listed in sys comments. It returns source files
 // and functions collection *Source if successful.
@@ -829,6 +854,7 @@ func (src *Source) Generate(w io.Writer) error {
 	if *winio {
 		src.ExternalImport("github.com/Microsoft/go-winio")
 	}
+	src.AppendExternalImport(extraImports)
 	if packageName != "syscall" {
 		src.Import("syscall")
 	}
@@ -861,17 +887,10 @@ func (src *Source) Generate(w io.Writer) error {
 	return nil
 }
 
-func usage() {
-	fmt.Fprintf(os.Stderr, "usage: mkwinsyscall [flags] [path ...]\n")
-	flag.PrintDefaults()
-	os.Exit(1)
-}
-
 func main() {
-	flag.Usage = usage
 	flag.Parse()
 	if len(flag.Args()) <= 0 {
-		fmt.Fprintf(os.Stderr, "no files to parse provided\n")
+		fmt.Fprintln(os.Stderr, "no files to parse provided")
 		usage()
 	}
 

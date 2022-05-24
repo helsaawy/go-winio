@@ -36,6 +36,8 @@ Usage:
 
 The flags are:
 
+    -import value
+        Specify additional packages to import; can be specified multiple times, or separated by commas.
     -output string
         Specify output file name (standard output if omitted).
     -sort
@@ -45,8 +47,10 @@ The flags are:
         Specify that all DLLs should be loaded from the Windows system directory (default true).
     -trace
         Generate print statement after every syscall.
-    winio
-        Import this package ("github.com/Microsoft/go-winio").
+    -utf16
+        Encode string arguments as UTF-16 for syscalls not ending in 'A' or 'W' (default true)
+    -winio
+        Import this package ["github.com/Microsoft/go-winio"].
 
 */
 package main

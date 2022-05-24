@@ -68,8 +68,6 @@ var (
 	procGetNamedPipeHandleStateW                             = modkernel32.NewProc("GetNamedPipeHandleStateW")
 	procGetNamedPipeInfo                                     = modkernel32.NewProc("GetNamedPipeInfo")
 	procGetQueuedCompletionStatus                            = modkernel32.NewProc("GetQueuedCompletionStatus")
-	procLocalAlloc                                           = modkernel32.NewProc("LocalAlloc")
-	procLocalFree                                            = modkernel32.NewProc("LocalFree")
 	procSetFileCompletionNotificationModes                   = modkernel32.NewProc("SetFileCompletionNotificationModes")
 	procNtCreateNamedPipeFile                                = modntdll.NewProc("NtCreateNamedPipeFile")
 	procRtlDefaultNpAcl                                      = modntdll.NewProc("RtlDefaultNpAcl")
@@ -360,17 +358,6 @@ func getQueuedCompletionStatus(port syscall.Handle, bytes *uint32, key *uintptr,
 	if r1 == 0 {
 		err = errnoErr(e1)
 	}
-	return
-}
-
-func localAlloc(uFlags uint32, length uint32) (ptr uintptr) {
-	r0, _, _ := syscall.Syscall(procLocalAlloc.Addr(), 2, uintptr(uFlags), uintptr(length), 0)
-	ptr = uintptr(r0)
-	return
-}
-
-func localFree(mem uintptr) {
-	syscall.Syscall(procLocalFree.Addr(), 1, uintptr(mem), 0, 0)
 	return
 }
 

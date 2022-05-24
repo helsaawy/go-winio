@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"github.com/Microsoft/go-winio/internal/kernel"
 )
 
 //sys connectNamedPipe(pipe syscall.Handle, o *syscall.Overlapped) (err error) = ConnectNamedPipe
@@ -21,7 +23,6 @@ import (
 //sys createFile(name string, access uint32, mode uint32, sa *syscall.SecurityAttributes, createmode uint32, attrs uint32, templatefile syscall.Handle) (handle syscall.Handle, err error) [failretval==syscall.InvalidHandle] = CreateFileW
 //sys getNamedPipeInfo(pipe syscall.Handle, flags *uint32, outSize *uint32, inSize *uint32, maxInstances *uint32) (err error) = GetNamedPipeInfo
 //sys getNamedPipeHandleState(pipe syscall.Handle, state *uint32, curInstances *uint32, maxCollectionCount *uint32, collectDataTimeout *uint32, userName *uint16, maxUserNameSize uint32) (err error) = GetNamedPipeHandleStateW
-//sys localAlloc(uFlags uint32, length uint32) (ptr uintptr) = LocalAlloc
 //sys ntCreateNamedPipeFile(pipe *syscall.Handle, access uint32, oa *objectAttributes, iosb *ioStatusBlock, share uint32, disposition uint32, options uint32, typ uint32, readMode uint32, completionMode uint32, maxInstances uint32, inboundQuota uint32, outputQuota uint32, timeout *int64) (status ntstatus) = ntdll.NtCreateNamedPipeFile
 //sys rtlNtStatusToDosError(status ntstatus) (winerr error) = ntdll.RtlNtStatusToDosErrorNoTeb
 //sys rtlDosPathNameToNtPathName(name *uint16, ntName *unicodeString, filePart uintptr, reserved uintptr) (status ntstatus) = ntdll.RtlDosPathNameToNtPathName_U
@@ -286,15 +287,14 @@ func makeServerPipeHandle(path string, sd []byte, c *PipeConfig, first bool) (sy
 	if err := rtlDosPathNameToNtPathName(&path16[0], &ntPath, 0, 0).Err(); err != nil {
 		return 0, &os.PathError{Op: "open", Path: path, Err: err}
 	}
-	defer localFree(ntPath.Buffer)
+	defer kernel.LocalFree(ntPath.Buffer)
 	oa.ObjectName = &ntPath
 
 	// The security descriptor is only needed for the first pipe.
 	if first {
 		if sd != nil {
-			len := uint32(len(sd))
-			sdb := localAlloc(0, len)
-			defer localFree(sdb)
+			sdb := kernel.LocalAllocMust(0, uint(len(sd)))
+			defer kernel.LocalFree(sdb)
 			copy((*[0xffff]byte)(unsafe.Pointer(sdb))[:], sd)
 			oa.SecurityDescriptor = (*securityDescriptor)(unsafe.Pointer(sdb))
 		} else {
@@ -303,7 +303,7 @@ func makeServerPipeHandle(path string, sd []byte, c *PipeConfig, first bool) (sy
 			if err := rtlDefaultNpAcl(&dacl).Err(); err != nil {
 				return 0, fmt.Errorf("getting default named pipe ACL: %s", err)
 			}
-			defer localFree(dacl)
+			defer kernel.LocalFree(dacl)
 
 			sdb := &securityDescriptor{
 				Revision: 1,

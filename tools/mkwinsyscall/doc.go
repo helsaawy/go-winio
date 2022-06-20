@@ -14,7 +14,8 @@ like func declarations if //sys is replaced by func, but:
   - The parameter lists must give a type for each argument:
     the (x, y, z int) shorthand is not allowed.
 
-  - If the return parameter is an error number, it must be named err.
+  - If the return parameter is an error number, it must be named err or panic.
+    If the error name is panic, then the function will panic if an error occurs.
 
   - If go func name needs to be different from its winapi dll name,
     the winapi name could be specified at the end, after "=" sign, like

@@ -189,7 +189,7 @@ func (p *Param) SyscallArgList() []string {
 
 // IsError determines if p parameter is used to return error.
 func (p *Param) IsError() bool {
-	return p.Name == "err" && p.Type == "error"
+	return p.Type == "error" && (p.Name == "err" || p.Name == "panic")
 }
 
 // HelperType returns type of parameter p used in helper function.
@@ -219,6 +219,7 @@ type Rets struct {
 	Name          string
 	Type          string
 	ReturnsError  bool
+	PanicsOnError bool
 	FailCond      string
 	fnMaybeAbsent bool
 }
@@ -265,7 +266,9 @@ func (r *Rets) PrintList() string {
 
 // SetReturnValuesCode returns source code that accepts syscall return values.
 func (r *Rets) SetReturnValuesCode() string {
-	if r.Name == "" && !r.ReturnsError {
+	needErr := r.ReturnsError || r.PanicsOnError
+
+	if r.Name == "" && !needErr {
 		return ""
 	}
 	retvar := "r0"
@@ -273,7 +276,7 @@ func (r *Rets) SetReturnValuesCode() string {
 		retvar = "r1"
 	}
 	errvar := "_"
-	if r.ReturnsError {
+	if needErr {
 		errvar = "e1"
 	}
 	return fmt.Sprintf("%s, _, %s := ", retvar, errvar)
@@ -283,11 +286,19 @@ func (r *Rets) useLongHandleErrorCode(retvar string) string {
 	const code = `if %s {
 		err = errnoErr(e1)
 	}`
+	const panicCode = `if %s {
+		err := errnoErr(e1)
+		panic(err)
+	}`
+	cc := code
+	if r.PanicsOnError {
+		cc = panicCode
+	}
 	cond := retvar + " == 0"
 	if r.FailCond != "" {
 		cond = strings.Replace(r.FailCond, "failretval", retvar, 1)
 	}
-	return fmt.Sprintf(code, cond)
+	return fmt.Sprintf(cc, cond)
 }
 
 // SetErrorCode returns source code that sets return parameters.
@@ -305,7 +316,9 @@ func (r *Rets) SetErrorCode() string {
 		%s = %sErrno(r0)
 	}`
 
-	if r.Name == "" && !r.ReturnsError {
+	needErr := r.ReturnsError || r.PanicsOnError
+
+	if r.Name == "" && !needErr {
 		return ""
 	}
 	if r.Name == "" {
@@ -331,7 +344,7 @@ func (r *Rets) SetErrorCode() string {
 	default:
 		s = fmt.Sprintf("%s = %s(r0)", r.Name, r.Type)
 	}
-	if !r.ReturnsError {
+	if !needErr {
 		return s
 	}
 	return s + "\n\t" + r.useLongHandleErrorCode(r.Name)
@@ -430,7 +443,8 @@ func newFn(s string) (*Fn, error) {
 		case 0:
 		case 1:
 			if r[0].IsError() {
-				f.Rets.ReturnsError = true
+				f.Rets.ReturnsError = r[0].Name == "err"
+				f.Rets.PanicsOnError = r[0].Name == "panic"
 			} else {
 				f.Rets.Name = r[0].Name
 				f.Rets.Type = r[0].Type
@@ -439,7 +453,8 @@ func newFn(s string) (*Fn, error) {
 			if !r[1].IsError() {
 				return nil, errors.New("Only last windows error is allowed as second return value in \"" + f.src + "\"")
 			}
-			f.Rets.ReturnsError = true
+			f.Rets.ReturnsError = r[1].Name == "err"
+			f.Rets.PanicsOnError = r[1].Name == "panic"
 			f.Rets.Name = r[0].Name
 			f.Rets.Type = r[0].Type
 		default:

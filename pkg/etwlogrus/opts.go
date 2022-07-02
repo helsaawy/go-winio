@@ -8,8 +8,6 @@ import (
 	"github.com/Microsoft/go-winio/pkg/etw"
 )
 
-// etw provider
-
 // WithNewETWProvider registers a new ETW provider and sets the hook to log using it.
 // The provider will be closed when the hook is closed.
 func WithNewETWProvider(n string) HookOpt {

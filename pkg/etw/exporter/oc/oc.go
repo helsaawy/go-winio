@@ -3,48 +3,40 @@
 package oc
 
 import (
-	"errors"
+	"fmt"
 	"sort"
 	"time"
 
 	"go.opencensus.io/trace"
 
+	common "github.com/Microsoft/go-winio/internal/etw/exporter"
 	"github.com/Microsoft/go-winio/pkg/etw"
 )
 
-// ErrNoProvider is returned when the exporter is created without a provider being configured.
-var ErrNoProvider = errors.New("no ETW registered provider")
-
-type ExporterOpt func(*exporter) error
-
 type exporter struct {
-	provider      *etw.Provider
-	closeProvider bool
-	// returns additional options to add to the event
-	getEventsOpts func(*trace.SpanData) []etw.EventOpt
-	formatTime    func(string, time.Time) etw.FieldOpt
+	common.Common
+	// provider      *etw.Provider
+	// closeProvider bool
+	// // returns additional options to add to the event
+	// getEventsOpts func(*trace.SpanData) []etw.EventOpt
+	// formatTime    func(string, time.Time) etw.FieldOpt
 }
 
 var _ trace.Exporter = &exporter{}
 
-// NewExporter returns a [trace.Exporter] that exports OpenCensus spans to ETW
+// NewExporter returns a [trace.Exporter] that exports Open Census spans to ETW
 // based on the the following rules:
 //  * ETW entries will contain the Attributes, SpanKind, TraceID,
 //   SpanID, and ParentSpanID.
 //  * Annotation, MessageEvents, and Links will not be exported.
 //  * The span itself will be written at [etw.LevelInfo], unless
 //   `s.Status.Code != 0`, in which case it will be written at [etw.LevelError],
-//   with the field `Error` set to Status.Message
-func NewExporter(opts ...ExporterOpt) (trace.Exporter, error) {
+//   with the field `Error` set to Status.Description
+func NewExporter(opts ...common.Opt) (trace.Exporter, error) {
 	e := &exporter{}
-	opts = append([]ExporterOpt{WithTimeFormat(time.RFC3339Nano)}, opts...)
-	for _, o := range opts {
-		if err := o(e); err != nil {
-			return nil, err
-		}
-	}
-	if e.provider == nil {
-		return nil, ErrNoProvider
+	opts = append([]common.Opt{common.WithTimeFormat(time.RFC3339Nano)}, opts...)
+	if err := common.InitExporter(e, opts...); err != nil {
+		return nil, fmt.Errorf("create new OpenCensus exporter: %w", err)
 	}
 	return e, nil
 }
@@ -55,7 +47,7 @@ func (e *exporter) ExportSpan(span *trace.SpanData) {
 	if hasError {
 		level = etw.LevelError
 	}
-	if !e.provider.IsEnabledForLevel(level) {
+	if !e.Provider().IsEnabledForLevel(level) {
 		return
 	}
 	name := span.Name
@@ -63,9 +55,7 @@ func (e *exporter) ExportSpan(span *trace.SpanData) {
 	// if the user also provides options
 	opts := make([]etw.EventOpt, 0, 3)
 	opts = append(opts, etw.WithLevel(level))
-	if e.getEventsOpts != nil {
-		opts = append(opts, e.getEventsOpts(span)...)
-	}
+	opts = append(opts, e.GetEventsOpts(span)...)
 
 	// Reserve extra space for the span properties .
 	fields := make([]etw.FieldOpt, 0, len(span.Attributes)+10)
@@ -73,8 +63,8 @@ func (e *exporter) ExportSpan(span *trace.SpanData) {
 		etw.StringField("TraceID", span.TraceID.String()),
 		etw.StringField("SpanID", span.SpanID.String()),
 		etw.StringField("ParentSpanID", span.ParentSpanID.String()),
-		e.formatTime("StartTime", span.StartTime),
-		e.formatTime("EndTime", span.EndTime),
+		e.FormatTime("StartTime", span.StartTime),
+		e.FormatTime("EndTime", span.EndTime),
 		etw.StringField("Duration", span.EndTime.Sub(span.StartTime).String()),
 		etw.Int32Field("Code", span.Code), // convert to gRPC status code string?
 		etw.StringField("Error", span.Message),
@@ -94,8 +84,8 @@ func (e *exporter) ExportSpan(span *trace.SpanData) {
 		fields = append(fields, etw.SmartField(k, data[k]))
 	}
 
-	if span.DroppedAnnotationCount > 0 {
-		fields = append(fields, etw.IntField("DroppedAnnotations", span.DroppedAnnotationCount))
+	if span.DroppedAttributeCount > 0 {
+		fields = append(fields, etw.IntField("DroppedAttributes", span.DroppedAttributeCount))
 	}
 
 	// Firing an ETW event is essentially best effort, as the event write can
@@ -103,7 +93,7 @@ func (e *exporter) ExportSpan(span *trace.SpanData) {
 	// as a session listening for the event having no available space in its
 	// buffers). Therefore, we don't return the error from WriteEvent, as it is
 	// just noise in many cases.
-	e.provider.WriteEvent(name, opts, fields) //nolint:errcheck
+	e.Provider().WriteEvent(name, opts, fields) //nolint:errcheck
 }
 func spanKindToString(sk int) string {
 	switch sk {

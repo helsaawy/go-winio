@@ -32,6 +32,9 @@ var _ trace.Exporter = &exporter{}
 //  * The span itself will be written at [etw.LevelInfo], unless
 //   `s.Status.Code != 0`, in which case it will be written at [etw.LevelError],
 //   with the field `Error` set to Status.Description
+//
+// This exporter ignores the [WithGetName] option and sets the ETW task name to the span
+// name.
 func NewExporter(opts ...common.Opt) (trace.Exporter, error) {
 	e := &exporter{}
 	opts = append([]common.Opt{common.WithTimeFormat(time.RFC3339Nano)}, opts...)

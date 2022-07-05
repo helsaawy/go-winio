@@ -140,6 +140,15 @@ func (addr *HvsockAddr) fromRaw(raw *rawHvsockAddr) {
 	addr.ServiceID = raw.ServiceID
 }
 
+func (r *rawHvsockAddr) IsRawSockaddr() {}
+
+func (r *rawHvsockAddr) Validate() error {
+	if r.Family != afHvSock {
+		return fmt.Errorf("got %d, want %d: %w", r.Family, afHvSock, socket.ErrAddrFamily)
+	}
+	return nil
+}
+
 // Sockaddr interface allows use with `sockets.Bind()` and `.ConnectEx()`
 func (r *rawHvsockAddr) Sockaddr() (ptr unsafe.Pointer, len int32, err error) {
 	return unsafe.Pointer(r), int32(unsafe.Sizeof(rawHvsockAddr{})), nil

@@ -27,50 +27,41 @@ var ErrSocketClosed = fmt.Errorf("socket closed: %w", net.ErrClosed)
 // buffer returned by the getsockname syscall. The buffer is allocated to the size specified
 // by `rsa.Sockaddr()`.
 func GetSockName(s windows.Handle, rsa RawSockaddr) error {
-	ptr, l, err := rsa.Sockaddr()
+	ptr, l, err := rawSockAsBuffer(rsa)
 	if err != nil {
 		return fmt.Errorf("could not find socket size to allocate buffer: %w", err)
 	}
-	if err = validateSockAddr(ptr, l); err != nil {
-		return err
-	}
 
-	b := make([]byte, l)
-	err = getsockname(s, unsafe.Pointer(&b[0]), &l)
+	err = getsockname(s, ptr, &l)
 	if err != nil {
 		// although getsockname returns WSAEFAULT if the buffer is too small, it does not set
 		// &l to the correct size, so--apart from doubling the buffer repeatedly--there is no remedy
 		return err
 	}
-	return rsa.FromBytes(b[:l])
+	return rsa.Validate()
 }
 
 // GetPeerName returns the remote address the socket is connected to.
 //
 // See GetSockName for more information.
 func GetPeerName(s windows.Handle, rsa RawSockaddr) error {
-	ptr, l, err := rsa.Sockaddr()
+	ptr, l, err := rawSockAsBuffer(rsa)
 	if err != nil {
 		return fmt.Errorf("could not find socket size to allocate buffer: %w", err)
 	}
-	if err = validateSockAddr(ptr, l); err != nil {
-		return err
-	}
-
-	b := make([]byte, l)
-	err = getpeername(s, unsafe.Pointer(&b[0]), &l)
+	err = getpeername(s, ptr, &l)
 	if err != nil {
 		return err
 	}
-	return rsa.FromBytes(b[:l])
+	return rsa.Validate()
 }
 
 func Bind(s windows.Handle, rsa RawSockaddr) (err error) {
-	ptr, l, err := rsa.Sockaddr()
+	ptr, l, err := rawSockAsBuffer(rsa)
 	if err != nil {
 		return fmt.Errorf("could not find socket pointer and size: %w", err)
 	}
-	if err = validateSockAddr(ptr, l); err != nil {
+	if err = rsa.Validate(); err != nil {
 		return err
 	}
 
@@ -133,11 +124,14 @@ func ConnectEx(fd windows.Handle, rsa RawSockaddr, sendBuf *byte, sendDataLen ui
 	if err := connectExFunc.Load(); err != nil {
 		return fmt.Errorf("failed to load ConnectEx function pointer: %w", err)
 	}
-	ptr, n, err := rsa.Sockaddr()
+	ptr, n, err := rawSockAsBuffer(rsa)
 	if err != nil {
 		return err
 	}
-	return connectEx(fd, ptr, n, sendBuf, sendDataLen, bytesSent, overlapped)
+	if err := connectEx(fd, ptr, n, sendBuf, sendDataLen, bytesSent, overlapped); err != nil {
+		return err
+	}
+	return rsa.Validate()
 }
 
 // BOOL LpfnConnectex(

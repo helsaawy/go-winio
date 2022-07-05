@@ -3,6 +3,7 @@ package socket
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"unsafe"
 )
 
@@ -14,28 +15,32 @@ var (
 	ErrAddrFamily     = errors.New("address family")
 )
 
+const AddressFamilySize = unsafe.Sizeof(uint16(0)) // ushort
+
 // todo: helsaawy - replace this with generics, along with GetSockName and co.
 
-// RawSockaddr allows structs to be used with Bind and ConnectEx. The
-// struct must meet the Win32 sockaddr requirements specified here:
+// RawSockaddr allows structs to be used with Bind, ConnectEx and other socket functions.
+// The struct must meet the Win32 sockaddr requirements specified here:
 // https://docs.microsoft.com/en-us/windows/win32/winsock/sockaddr-2
+//
+// This a dummy interface to prevent socket functions from accepting arbitrary interface{} parameters.
 type RawSockaddr interface {
-	// Sockaddr returns a pointer to the RawSockaddr and the length of the struct.
-	Sockaddr() (unsafe.Pointer, int32, error)
-
-	// FromBytes populates the RawsockAddr with the data in the byte array.
-	// Implementers should check the buffer is correctly sized and the address family
-	// is appropriate.
-	// Receivers should be pointers.
-	FromBytes([]byte) error
+	IsRawSockaddr()
+	Validate() error
 }
 
-func validateSockAddr(ptr unsafe.Pointer, n int32) error {
-	if ptr == nil {
-		return fmt.Errorf("pointer is %p: %w", ptr, ErrInvalidPointer)
+func rawSockAsBuffer(r RawSockaddr) (unsafe.Pointer, int32, error) {
+	v := reflect.ValueOf(r)
+	if v.Type().Kind() != reflect.Ptr {
+		return nil, 0, fmt.Errorf("receiver is not a pointer: %w", ErrBufferSize)
 	}
-	if n < 1 {
-		return fmt.Errorf("buffer size %d < 1: %w", n, ErrBufferSize)
+
+	v = v.Elem()
+	ptr := v.UnsafePointer()
+	n := int32(v.Type().Size())
+	if n < int32(AddressFamilySize) {
+		return nil, 0, fmt.Errorf("RawSockaddr struct size is %d, should be larger than %d: %w", n, AddressFamilySize, ErrBufferSize)
 	}
-	return nil
+
+	return ptr, n, nil
 }

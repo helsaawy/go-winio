@@ -237,7 +237,7 @@ func (l *HvsockListener) Accept() (_ net.Conn, err error) {
 	if err != nil {
 		return nil, l.opErr("accept", err)
 	}
-	defer l.sock.Wg.Done()
+	defer c.Close()
 
 	// AcceptEx, per documentation, requires an extra 16 bytes per address:
 	// https://docs.microsoft.com/en-us/windows/win32/api/mswsock/nf-mswsock-acceptex
@@ -341,7 +341,7 @@ func (d *HvsockDialer) Dial(ctx context.Context, addr *HvsockAddr) (conn *Hvsock
 	if err != nil {
 		return nil, conn.opErr(op, err)
 	}
-	defer sock.Wg.Done()
+	defer c.Close()
 	var bytes uint32
 	for i := uint(0); i <= d.Retries; i++ {
 		err = socket.ConnectEx(
@@ -444,7 +444,7 @@ func (conn *HvsockConn) Read(b []byte) (int, error) {
 	if err != nil {
 		return 0, conn.opErr("read", err)
 	}
-	defer conn.sock.Wg.Done()
+	defer c.Close()
 	buf := syscall.WSABuf{Buf: &b[0], Len: uint32(len(b))}
 	var flags, bytes uint32
 	err = syscall.WSARecv(conn.sock.Handle, &buf, 1, &bytes, &flags, &c.O, nil)
@@ -479,7 +479,7 @@ func (conn *HvsockConn) write(b []byte) (int, error) {
 	if err != nil {
 		return 0, conn.opErr("write", err)
 	}
-	defer conn.sock.Wg.Done()
+	defer c.Close()
 	buf := syscall.WSABuf{Buf: &b[0], Len: uint32(len(b))}
 	var bytes uint32
 	err = syscall.WSASend(conn.sock.Handle, &buf, 1, &bytes, 0, &c.O, nil)
@@ -552,14 +552,7 @@ func (conn *HvsockConn) RemoteAddr() net.Addr {
 
 // SetDeadline implements the net.Conn SetDeadline method.
 func (conn *HvsockConn) SetDeadline(t time.Time) error {
-	// todo: implement `SetDeadline` for `win32File`
-	if err := conn.SetReadDeadline(t); err != nil {
-		return fmt.Errorf("set read deadline: %w", err)
-	}
-	if err := conn.SetWriteDeadline(t); err != nil {
-		return fmt.Errorf("set write deadline: %w", err)
-	}
-	return nil
+	return conn.sock.SetDeadline(t)
 }
 
 // SetReadDeadline implements the net.Conn SetReadDeadline method.

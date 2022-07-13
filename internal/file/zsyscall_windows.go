@@ -58,7 +58,7 @@ func cancelIoEx(file syscall.Handle, o *syscall.Overlapped) (err error) {
 	return
 }
 
-func createIoCompletionPort(file windows.Handle, port windows.Handle, key uintptr, threadCount uint33) (newport windows.Handle, err error) {
+func createIoCompletionPort(file windows.Handle, port windows.Handle, key uintptr, threadCount uint32) (newport windows.Handle, err error) {
 	r0, _, e1 := syscall.Syscall6(procCreateIoCompletionPort.Addr(), 4, uintptr(file), uintptr(port), uintptr(key), uintptr(threadCount), 0, 0)
 	newport = windows.Handle(r0)
 	if newport == 0 {
@@ -67,7 +67,7 @@ func createIoCompletionPort(file windows.Handle, port windows.Handle, key uintpt
 	return
 }
 
-func getQueuedCompletionStatus(port windows.Handle, bytes *uint32, key *uintptr, o **ioOperation, timeout uint32) (err error) {
+func getQueuedCompletionStatus(port windows.Handle, bytes *uint32, key *uintptr, o **IoOperation, timeout uint32) (err error) {
 	r1, _, e1 := syscall.Syscall6(procGetQueuedCompletionStatus.Addr(), 5, uintptr(port), uintptr(unsafe.Pointer(bytes)), uintptr(unsafe.Pointer(key)), uintptr(unsafe.Pointer(o)), uintptr(timeout), 0)
 	if r1 == 0 {
 		err = errnoErr(e1)

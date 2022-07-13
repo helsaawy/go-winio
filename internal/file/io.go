@@ -3,63 +3,94 @@
 package file
 
 import (
+	"fmt"
+	"sync"
 	"syscall"
 
 	"golang.org/x/sys/windows"
-
-	"github.com/Microsoft/go-winio/internal/sync"
 )
 
 //sys getQueuedCompletionStatus(port windows.Handle, bytes *uint32, key *uintptr, o **ioOperation, timeout uint32) (err error) = GetQueuedCompletionStatus
-//sys createIoCompletionPort(file windows.Handle, port windows.Handle, key uintptr, threadCount uint33) (newport windows.Handle, err error) = CreateIoCompletionPort
+//sys createIoCompletionPort(file windows.Handle, port windows.Handle, key uintptr, threadCount uint32) (newport windows.Handle, err error) = CreateIoCompletionPort
 
-var ioCompletionPort = sync.NewLazyHandle(func() (h windows.Handle, err error) {
-	if h, err = createIoCompletionPort(windows.InvalidHandle, 0, 0, 0xffffffff); err != nil {
-		return windows.InvalidHandle, err
+var _ioProcessor = ioCompletionProcessor{}
+
+type ioCompletionProcessor struct {
+	// h is the I/O completion port
+	h windows.Handle
+	// once initializes h, and starts processing
+	once sync.Once
+}
+
+func (p *ioCompletionProcessor) port() windows.Handle {
+	p.do()
+	return p.h
+}
+
+func (p *ioCompletionProcessor) do() {
+	p.once.Do(func() {
+		var err error
+		p.h, err = createIoCompletionPort(windows.InvalidHandle, 0, 0, 0xffffffff)
+		if err != nil {
+			panic(fmt.Sprintf("could not create a new I/O completion port: %v", err))
+		}
+		go p.start()
+	})
+}
+
+// start loops forever, notifying [IoOperations] when their I/O operation completes.
+// Assumes that [ioCompletionQueueProcessor.do] has been called and [p.h] is initialized and valid.
+func (p *ioCompletionProcessor) start() {
+	for {
+		var bytes uint32
+		var key uintptr
+		var op *IoOperation
+		err := getQueuedCompletionStatus(p.h, &bytes, &key, &op, syscall.INFINITE)
+		if op == nil {
+			panic(err)
+		}
+		op.ch <- ioResult{bytes, err}
 	}
-	go ioCompletionProcessor(h)
-	return h, nil
-})
+}
 
 func createFileIoCompletionPort(h windows.Handle) error {
 	// can ignore the returned port handle since it will be equal to the existing IO completion port
-	_, err := createIoCompletionPort(h, ioCompletionPort.Handle(), 0, 0xffffffff)
+	_, err := createIoCompletionPort(h, _ioProcessor.port(), 0, 0xffffffff)
 	return err
+}
+
+// IoOperation represents an outstanding asynchronous (overlapped) Win32 I/O operation.
+//
+// The underlying [syscall.Overlapped] is passed to Win32 APIs when starting a new file operation.
+// The OS enqueues a pointer to the provided [syscall.Overlapped] when an I/O operation completes,
+// accessible via GetQueuedCompletionStatus.
+// By casting that pointer to an [IoOperation], the associated chan ioResult can be used to notify waiters.
+type IoOperation struct {
+	O  syscall.Overlapped
+	ch chan ioResult
+	f  *Win32File
+}
+
+// newIoOperation creates an [IoOperation] associated with the [Win32File] f.
+// The caller must hold f.wgLock.RLock
+func newIoOperation(f *Win32File) *IoOperation {
+	c := &IoOperation{
+		f: f,
+	}
+	f.wg.Add(1)
+	c.ch = make(chan ioResult)
+	return c
+}
+
+func (c *IoOperation) Close() error {
+	close(c.ch)
+	c.f.wg.Done()
+	c.f = nil
+	return nil
 }
 
 // ioResult contains the result of an asynchronous IO operation
 type ioResult struct {
 	bytes uint32
 	err   error
-}
-
-// ioOperation represents an outstanding asynchronous Win32 IO
-//
-// The underlying [syscall.Overlapped] is passed to Win32 APIs when starting a new file operation.
-// The OS enqueues a pointer to the provided [syscall.Overlapped] when an I/O operation completes,
-// accessible via GetQueuedCompletionStatus.
-// By casting that pointer to an [ioOperation], the associated chan ioResult can be used to notify waiters.
-type ioOperation struct {
-	O  syscall.Overlapped
-	ch chan ioResult
-}
-
-func newIOOperation() *ioOperation {
-	c := &ioOperation{}
-	c.ch = make(chan ioResult)
-	return c
-}
-
-// ioCompletionProcessor processes completed async IOs forever
-func ioCompletionProcessor(h windows.Handle) {
-	for {
-		var bytes uint32
-		var key uintptr
-		var op *ioOperation
-		err := getQueuedCompletionStatus(h, &bytes, &key, &op, syscall.INFINITE)
-		if op == nil {
-			panic(err)
-		}
-		op.ch <- ioResult{bytes, err}
-	}
 }

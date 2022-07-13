@@ -529,7 +529,7 @@ func TestMessageReadMode(t *testing.T) {
 
 	p := c.(*win32MessageBytePipe)
 	mode := uint32(cPIPE_READMODE_MESSAGE)
-	if s, _, err := setNamedPipeHandleState.Call(uintptr(p.handle), uintptr(unsafe.Pointer(&mode)), 0, 0); s == 0 {
+	if s, _, err := setNamedPipeHandleState.Call(uintptr(p.Handle), uintptr(unsafe.Pointer(&mode)), 0, 0); s == 0 {
 		t.Fatal(err)
 	}
 

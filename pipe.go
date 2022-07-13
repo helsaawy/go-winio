@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"github.com/Microsoft/go-winio/internal/file"
 )
 
 //sys connectNamedPipe(pipe syscall.Handle, o *syscall.Overlapped) (err error) = ConnectNamedPipe
@@ -95,7 +97,7 @@ var (
 )
 
 type win32Pipe struct {
-	*win32File
+	*file.Win32File
 	path string
 }
 
@@ -115,22 +117,16 @@ func (f *win32Pipe) RemoteAddr() net.Addr {
 	return pipeAddress(f.path)
 }
 
-func (f *win32Pipe) SetDeadline(t time.Time) error {
-	f.SetReadDeadline(t)
-	f.SetWriteDeadline(t)
-	return nil
-}
-
 // CloseWrite closes the write side of a message pipe in byte mode.
 func (f *win32MessageBytePipe) CloseWrite() error {
 	if f.writeClosed {
 		return errPipeWriteClosed
 	}
-	err := f.win32File.Flush()
+	err := f.Win32File.Flush()
 	if err != nil {
 		return err
 	}
-	_, err = f.win32File.Write(nil)
+	_, err = f.Win32File.Write(nil)
 	if err != nil {
 		return err
 	}
@@ -147,7 +143,7 @@ func (f *win32MessageBytePipe) Write(b []byte) (int, error) {
 	if len(b) == 0 {
 		return 0, nil
 	}
-	return f.win32File.Write(b)
+	return f.Win32File.Write(b)
 }
 
 // Read reads bytes from a message pipe in byte mode. A read of a zero-byte message on a message
@@ -156,7 +152,7 @@ func (f *win32MessageBytePipe) Read(b []byte) (int, error) {
 	if f.readEOF {
 		return 0, io.EOF
 	}
-	n, err := f.win32File.Read(b)
+	n, err := f.Win32File.Read(b)
 	if err == io.EOF {
 		// If this was the result of a zero-byte read, then
 		// it is possible that the read was due to a zero-size
@@ -243,7 +239,7 @@ func DialPipeAccess(ctx context.Context, path string, access uint32) (net.Conn, 
 		return nil, err
 	}
 
-	f, err := makeWin32File(h)
+	f, err := file.MakeWin32File(h, false)
 	if err != nil {
 		syscall.Close(h)
 		return nil, err
@@ -253,14 +249,14 @@ func DialPipeAccess(ctx context.Context, path string, access uint32) (net.Conn, 
 	// supports CloseWrite().
 	if flags&cPIPE_TYPE_MESSAGE != 0 {
 		return &win32MessageBytePipe{
-			win32Pipe: win32Pipe{win32File: f, path: path},
+			win32Pipe: win32Pipe{Win32File: f, path: path},
 		}, nil
 	}
-	return &win32Pipe{win32File: f, path: path}, nil
+	return &win32Pipe{Win32File: f, path: path}, nil
 }
 
 type acceptResponse struct {
-	f   *win32File
+	f   *file.Win32File
 	err error
 }
 
@@ -344,12 +340,12 @@ func makeServerPipeHandle(path string, sd []byte, c *PipeConfig, first bool) (sy
 	return h, nil
 }
 
-func (l *win32PipeListener) makeServerPipe() (*win32File, error) {
+func (l *win32PipeListener) makeServerPipe() (*file.Win32File, error) {
 	h, err := makeServerPipeHandle(l.path, nil, &l.config, false)
 	if err != nil {
 		return nil, err
 	}
-	f, err := makeWin32File(h)
+	f, err := file.MakeWin32File(h, false)
 	if err != nil {
 		syscall.Close(h)
 		return nil, err
@@ -357,7 +353,7 @@ func (l *win32PipeListener) makeServerPipe() (*win32File, error) {
 	return f, nil
 }
 
-func (l *win32PipeListener) makeConnectedServerPipe() (*win32File, error) {
+func (l *win32PipeListener) makeConnectedServerPipe() (*file.Win32File, error) {
 	p, err := l.makeServerPipe()
 	if err != nil {
 		return nil, err
@@ -365,7 +361,7 @@ func (l *win32PipeListener) makeConnectedServerPipe() (*win32File, error) {
 
 	// Wait for the client to connect.
 	ch := make(chan error)
-	go func(p *win32File) {
+	go func(p *file.Win32File) {
 		ch <- connectPipe(p)
 	}(p)
 
@@ -395,7 +391,7 @@ func (l *win32PipeListener) listenerRoutine() {
 			closed = true
 		case responseCh := <-l.acceptCh:
 			var (
-				p   *win32File
+				p   *file.Win32File
 				err error
 			)
 			for {
@@ -468,15 +464,15 @@ func ListenPipe(path string, c *PipeConfig) (net.Listener, error) {
 	return l, nil
 }
 
-func connectPipe(p *win32File) error {
-	c, err := p.prepareIo()
+func connectPipe(p *file.Win32File) error {
+	c, err := p.PrepareIo()
 	if err != nil {
 		return err
 	}
-	defer p.wg.Done()
+	defer c.Close()
 
-	err = connectNamedPipe(p.handle, &c.o)
-	_, err = p.asyncIo(c, nil, 0, err)
+	err = connectNamedPipe(p.Handle, &c.O)
+	_, err = p.AsyncIo(c, nil, 0, err)
 	if err != nil && err != cERROR_PIPE_CONNECTED {
 		return err
 	}
@@ -494,10 +490,10 @@ func (l *win32PipeListener) Accept() (net.Conn, error) {
 		}
 		if l.config.MessageMode {
 			return &win32MessageBytePipe{
-				win32Pipe: win32Pipe{win32File: response.f, path: l.path},
+				win32Pipe: win32Pipe{Win32File: response.f, path: l.path},
 			}, nil
 		}
-		return &win32Pipe{win32File: response.f, path: l.path}, nil
+		return &win32Pipe{Win32File: response.f, path: l.path}, nil
 	case <-l.doneCh:
 		return nil, ErrPipeListenerClosed
 	}

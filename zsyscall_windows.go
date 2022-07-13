@@ -41,7 +41,6 @@ var (
 	modadvapi32 = windows.NewLazySystemDLL("advapi32.dll")
 	modkernel32 = windows.NewLazySystemDLL("kernel32.dll")
 	modntdll    = windows.NewLazySystemDLL("ntdll.dll")
-	modws2_32   = windows.NewLazySystemDLL("ws2_32.dll")
 
 	procAdjustTokenPrivileges                                = modadvapi32.NewProc("AdjustTokenPrivileges")
 	procConvertSecurityDescriptorToStringSecurityDescriptorW = modadvapi32.NewProc("ConvertSecurityDescriptorToStringSecurityDescriptorW")
@@ -57,23 +56,18 @@ var (
 	procRevertToSelf                                         = modadvapi32.NewProc("RevertToSelf")
 	procBackupRead                                           = modkernel32.NewProc("BackupRead")
 	procBackupWrite                                          = modkernel32.NewProc("BackupWrite")
-	procCancelIoEx                                           = modkernel32.NewProc("CancelIoEx")
 	procConnectNamedPipe                                     = modkernel32.NewProc("ConnectNamedPipe")
 	procCreateFileW                                          = modkernel32.NewProc("CreateFileW")
-	procCreateIoCompletionPort                               = modkernel32.NewProc("CreateIoCompletionPort")
 	procCreateNamedPipeW                                     = modkernel32.NewProc("CreateNamedPipeW")
 	procGetCurrentThread                                     = modkernel32.NewProc("GetCurrentThread")
 	procGetNamedPipeHandleStateW                             = modkernel32.NewProc("GetNamedPipeHandleStateW")
 	procGetNamedPipeInfo                                     = modkernel32.NewProc("GetNamedPipeInfo")
-	procGetQueuedCompletionStatus                            = modkernel32.NewProc("GetQueuedCompletionStatus")
 	procLocalAlloc                                           = modkernel32.NewProc("LocalAlloc")
 	procLocalFree                                            = modkernel32.NewProc("LocalFree")
-	procSetFileCompletionNotificationModes                   = modkernel32.NewProc("SetFileCompletionNotificationModes")
 	procNtCreateNamedPipeFile                                = modntdll.NewProc("NtCreateNamedPipeFile")
 	procRtlDefaultNpAcl                                      = modntdll.NewProc("RtlDefaultNpAcl")
 	procRtlDosPathNameToNtPathName_U                         = modntdll.NewProc("RtlDosPathNameToNtPathName_U")
 	procRtlNtStatusToDosErrorNoTeb                           = modntdll.NewProc("RtlNtStatusToDosErrorNoTeb")
-	procWSAGetOverlappedResult                               = modws2_32.NewProc("WSAGetOverlappedResult")
 )
 
 func adjustTokenPrivileges(token windows.Token, releaseAll bool, input *byte, outputSize uint32, output *byte, requiredSize *uint32) (success bool, err error) {
@@ -269,14 +263,6 @@ func backupWrite(h syscall.Handle, b []byte, bytesWritten *uint32, abort bool, p
 	return
 }
 
-func cancelIoEx(file syscall.Handle, o *syscall.Overlapped) (err error) {
-	r1, _, e1 := syscall.Syscall(procCancelIoEx.Addr(), 2, uintptr(file), uintptr(unsafe.Pointer(o)), 0)
-	if r1 == 0 {
-		err = errnoErr(e1)
-	}
-	return
-}
-
 func connectNamedPipe(pipe syscall.Handle, o *syscall.Overlapped) (err error) {
 	r1, _, e1 := syscall.Syscall(procConnectNamedPipe.Addr(), 2, uintptr(pipe), uintptr(unsafe.Pointer(o)), 0)
 	if r1 == 0 {
@@ -298,15 +284,6 @@ func _createFile(name *uint16, access uint32, mode uint32, sa *syscall.SecurityA
 	r0, _, e1 := syscall.Syscall9(procCreateFileW.Addr(), 7, uintptr(unsafe.Pointer(name)), uintptr(access), uintptr(mode), uintptr(unsafe.Pointer(sa)), uintptr(createmode), uintptr(attrs), uintptr(templatefile), 0, 0)
 	handle = syscall.Handle(r0)
 	if handle == syscall.InvalidHandle {
-		err = errnoErr(e1)
-	}
-	return
-}
-
-func createIoCompletionPort(file syscall.Handle, port syscall.Handle, key uintptr, threadCount uint32) (newport syscall.Handle, err error) {
-	r0, _, e1 := syscall.Syscall6(procCreateIoCompletionPort.Addr(), 4, uintptr(file), uintptr(port), uintptr(key), uintptr(threadCount), 0, 0)
-	newport = syscall.Handle(r0)
-	if newport == 0 {
 		err = errnoErr(e1)
 	}
 	return
@@ -352,14 +329,6 @@ func getNamedPipeInfo(pipe syscall.Handle, flags *uint32, outSize *uint32, inSiz
 	return
 }
 
-func getQueuedCompletionStatus(port syscall.Handle, bytes *uint32, key *uintptr, o **ioOperation, timeout uint32) (err error) {
-	r1, _, e1 := syscall.Syscall6(procGetQueuedCompletionStatus.Addr(), 5, uintptr(port), uintptr(unsafe.Pointer(bytes)), uintptr(unsafe.Pointer(key)), uintptr(unsafe.Pointer(o)), uintptr(timeout), 0)
-	if r1 == 0 {
-		err = errnoErr(e1)
-	}
-	return
-}
-
 func localAlloc(uFlags uint32, length uint32) (ptr uintptr) {
 	r0, _, _ := syscall.Syscall(procLocalAlloc.Addr(), 2, uintptr(uFlags), uintptr(length), 0)
 	ptr = uintptr(r0)
@@ -368,14 +337,6 @@ func localAlloc(uFlags uint32, length uint32) (ptr uintptr) {
 
 func localFree(mem uintptr) {
 	syscall.Syscall(procLocalFree.Addr(), 1, uintptr(mem), 0, 0)
-	return
-}
-
-func setFileCompletionNotificationModes(h syscall.Handle, flags uint8) (err error) {
-	r1, _, e1 := syscall.Syscall(procSetFileCompletionNotificationModes.Addr(), 2, uintptr(h), uintptr(flags), 0)
-	if r1 == 0 {
-		err = errnoErr(e1)
-	}
 	return
 }
 
@@ -401,18 +362,6 @@ func rtlNtStatusToDosError(status ntstatus) (winerr error) {
 	r0, _, _ := syscall.Syscall(procRtlNtStatusToDosErrorNoTeb.Addr(), 1, uintptr(status), 0, 0)
 	if r0 != 0 {
 		winerr = syscall.Errno(r0)
-	}
-	return
-}
-
-func wsaGetOverlappedResult(h syscall.Handle, o *syscall.Overlapped, bytes *uint32, wait bool, flags *uint32) (err error) {
-	var _p0 uint32
-	if wait {
-		_p0 = 1
-	}
-	r1, _, e1 := syscall.Syscall6(procWSAGetOverlappedResult.Addr(), 5, uintptr(h), uintptr(unsafe.Pointer(o)), uintptr(unsafe.Pointer(bytes)), uintptr(_p0), uintptr(unsafe.Pointer(flags)), 0)
-	if r1 == 0 {
-		err = errnoErr(e1)
 	}
 	return
 }

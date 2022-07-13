@@ -4,6 +4,7 @@ package file
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"runtime"
@@ -39,15 +40,17 @@ func (e *timeoutError) Temporary() bool { return true }
 // Win32File implements Reader, Writer, and Closer on a Win32 handle without blocking in a syscall.
 // It takes ownership of this handle and will close it if it is garbage collected.
 type Win32File struct {
-	Handle syscall.Handle
-	// Wg is the group for all pending IO operations
-	Wg            sync.WaitGroup
+	Handle        syscall.Handle
 	ReadDeadline  deadlineHandler
 	WriteDeadline deadlineHandler
 
 	isSocket bool
-	wgLock   sync.RWMutex
-	closing  isync.AtomicBool
+	// wgLock should be locked when closing or adding new operations to prevent new operations
+	// from starting while mutating file state
+	wgLock sync.RWMutex
+	// wg is the group for all pending IO operations
+	wg      sync.WaitGroup
+	closing isync.AtomicBool
 }
 
 var _ io.ReadWriteCloser = &Win32File{}
@@ -76,7 +79,7 @@ func (f *Win32File) closeHandle() {
 		f.wgLock.Unlock()
 		// cancel all IO and wait for it to complete
 		cancelIoEx(f.Handle, nil) //nolint:errcheck
-		f.Wg.Wait()
+		f.wg.Wait()
 		// at this point, no new IO can start
 		syscall.Close(f.Handle)
 		f.Handle = 0
@@ -97,24 +100,20 @@ func (f *Win32File) IsClosed() bool {
 }
 
 // PrepareIo prepares for a new IO operation.
-// The caller must call f.wg.Done() when the IO is finished, prior to Close() returning.
-func (f *Win32File) PrepareIo() (*ioOperation, error) {
+// The caller must call [IoOperation.Close] when the IO is finished, prior to [Close()] returning.
+func (f *Win32File) PrepareIo() (*IoOperation, error) {
 	f.wgLock.RLock()
+	defer f.wgLock.RUnlock()
 	if f.closing.IsSet() {
-		f.wgLock.RUnlock()
 		return nil, ErrFileClosed
 	}
-	f.Wg.Add(1)
-	f.wgLock.RUnlock()
-	c := newIOOperation()
+	c := newIoOperation(f)
 	return c, nil
 }
 
-// todo: helsaawy - create an asyncIO version that takes a context
-
 // AsyncIo processes the return value from ReadFile or WriteFile, blocking until
 // the operation has actually completed.
-func (f *Win32File) AsyncIo(c *ioOperation, d cancellation, bytes uint32, err error) (int, error) {
+func (f *Win32File) AsyncIo(c *IoOperation, d deadline, bytes uint32, err error) (int, error) {
 	//nolint:errorlint
 	if err != syscall.ERROR_IO_PENDING {
 		return int(bytes), err
@@ -160,7 +159,7 @@ func (f *Win32File) Read(b []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer f.Wg.Done()
+	defer c.Close()
 
 	if f.ReadDeadline.timedout.IsSet() {
 		return 0, ErrTimeout
@@ -169,6 +168,7 @@ func (f *Win32File) Read(b []byte) (int, error) {
 	var bytes uint32
 	err = syscall.ReadFile(f.Handle, b, &bytes, &c.O)
 	n, err := f.AsyncIo(c, &f.ReadDeadline, bytes, err)
+	// todo: is this needed for reads, since should AsyncIo block until the data is read from b
 	runtime.KeepAlive(b)
 
 	// Handle EOF conditions.
@@ -187,7 +187,7 @@ func (f *Win32File) Write(b []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer f.Wg.Done()
+	defer c.Close()
 
 	if f.WriteDeadline.timedout.IsSet() {
 		return 0, ErrTimeout
@@ -198,6 +198,17 @@ func (f *Win32File) Write(b []byte) (int, error) {
 	n, err := f.AsyncIo(c, &f.WriteDeadline, bytes, err)
 	runtime.KeepAlive(b)
 	return n, err
+}
+
+// SetDeadline implements the net.Conn SetDeadline method.
+func (f *Win32File) SetDeadline(t time.Time) error {
+	if err := f.SetReadDeadline(t); err != nil {
+		return fmt.Errorf("set read deadline: %w", err)
+	}
+	if err := f.SetWriteDeadline(t); err != nil {
+		return fmt.Errorf("set write deadline: %w", err)
+	}
+	return nil
 }
 
 func (f *Win32File) SetReadDeadline(deadline time.Time) error {
@@ -225,31 +236,38 @@ func (f *Win32File) OSFile(name string) *os.File {
 	return os.NewFile(f.Fd(), name)
 }
 
-type cancellationChan = <-chan struct{}
+type emptyCh chan struct{}
+type blockChan = <-chan struct{}
 
-type cancellation interface {
-	Done() cancellationChan
+type deadline interface {
+	Done() blockChan
 }
 
+// TODO:
+// https://cs.opensource.google/go/go/+/refs/tags/go1.18.4:src/internal/poll/fd_poll_runtime.go;l=28;drc=bf2ef26be3593d24487311576d85ec601185fbf4;bpv=0;bpt=1
+// https://cs.opensource.google/go/go/+/master:src/runtime/netpoll.go;drc=bf2ef26be3593d24487311576d85ec601185fbf4;l=103
+// https://cs.opensource.google/go/go/+/master:src/runtime/netpoll.go;drc=bf2ef26be3593d24487311576d85ec601185fbf4;l=326
+
+// a stripped down, resettable timer that can be viewed as a [context.Context] created via
 type deadlineHandler struct {
 	setLock     sync.Mutex
-	channel     chan struct{}
+	channel     emptyCh
 	channelLock sync.RWMutex
 	timer       *time.Timer
 	timedout    isync.AtomicBool
 }
 
-var _ cancellation = &deadlineHandler{}
+var _ deadline = &deadlineHandler{}
 
 func newDeadlineHandler() deadlineHandler {
 	return deadlineHandler{
-		channel: make(chan struct{}),
+		channel: make(emptyCh),
 	}
 }
 
-func (d *deadlineHandler) Done() cancellationChan {
-	if d != nil {
-		return make(cancellationChan)
+func (d *deadlineHandler) Done() blockChan {
+	if d == nil {
+		return make(emptyCh)
 	}
 
 	d.channelLock.Lock()
@@ -272,7 +290,7 @@ func (d *deadlineHandler) set(deadline time.Time) error {
 	select {
 	case <-d.channel:
 		d.channelLock.Lock()
-		d.channel = make(chan struct{})
+		d.channel = make(emptyCh)
 		d.channelLock.Unlock()
 	default:
 	}

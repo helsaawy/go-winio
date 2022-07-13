@@ -20,10 +20,15 @@ type AtomicBool struct {
 func (x *AtomicBool) IsSet() bool      { return atomic.LoadUint32(&x.v) != 0 }
 func (x *AtomicBool) SetFalse()        { x.Store(false) }
 func (x *AtomicBool) SetTrue()         { x.Store(true) }
-func (x *AtomicBool) Store(v bool)     { atomic.StoreUint32(&x.v, b2u(v)) }
-func (x *AtomicBool) Swap(v bool) bool { return atomic.SwapUint32(&x.v, b2u(v)) == 1 }
+func (x *AtomicBool) Store(v bool)     { atomic.StoreUint32(&x.v, bu32(v)) }
+func (x *AtomicBool) Swap(v bool) bool { return atomic.SwapUint32(&x.v, bu32(v)) == 1 }
+func (x *AtomicBool) CompareAndSwap(old, new bool) (swapped bool) { //nolint:predeclared
+	return atomic.CompareAndSwapUint32(&x.v, bu32(old), bu32(new))
+}
 
-func b2u(b bool) (u uint32) {
+// directly copied from
+// https://cs.opensource.google/go/go/+/refs/tags/go1.19rc2:src/sync/atomic/type.go;l=31-36
+func bu32(b bool) (u uint32) {
 	if b {
 		u = 1
 	}

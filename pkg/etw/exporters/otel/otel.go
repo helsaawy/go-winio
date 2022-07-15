@@ -4,7 +4,6 @@ package otel
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -17,40 +16,25 @@ import (
 
 	// "go.opentelemetry.io/otel"
 	// "go.opentelemetry.io/otel/propagation"
-	// "go.opentelemetry.io/otel/sdk/resource"
-	// "go.opentelemetry.io/otel/sdk/trace"
 	// semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
 
-	common "github.com/Microsoft/go-winio/internal/etw/exporter"
 	"github.com/Microsoft/go-winio/pkg/etw"
+	common "github.com/Microsoft/go-winio/pkg/etw/internal/exporters"
+	"github.com/Microsoft/go-winio/pkg/etw/internal/exporters/fields"
 )
 
-// WithExportEvents sets whether the Open Telemetry Exporter will export
-func WithExportEvents(b bool) common.Opt {
-	return func(e common.Exporter) error {
-		switch ee := e.(type) {
-		case *exporter:
-			ee.exportEvents = b
-		default:
-			return common.ExporterTypeErr(e, &exporter{})
-		}
-		return nil
-	}
-}
+type input = trace.ReadOnlySpan
 
-// although otel guarantees that the SpanExporter will be called synchronously,
-// enforce thread safety in case multiple TraceProviders use the same exporter
-
-// todo: find a way to allow
+type Opt func(*exporter) error
 
 type exporter struct {
-	common.Common
+	c            common.Common[trace.ReadOnlySpan]
 	exportEvents bool
 }
 
 var _ trace.SpanExporter = &exporter{}
 
-// NewExporter returns a [trace.SpanExporter] that exports Open Telemetry spans to ETW
+// New returns a [trace.SpanExporter] that exports Open Telemetry spans to ETW
 // based on the the following rules:
 //  * ETW entries will contain the Attributes, SpanKind, TraceID,
 //   SpanID, and ParentSpanID.
@@ -62,11 +46,16 @@ var _ trace.SpanExporter = &exporter{}
 // This exporter ignores the [WithGetName] option and sets the ETW task name to the span name.
 // Additionally, the function specified in [WithEventOpts] is expected to work on both
 // [trace.ReadOnlySpan], and if [WithExportEvents] is set to true, [trace.Event] as well.
-func NewExporter(opts ...common.Opt) (trace.SpanExporter, error) {
+func New(opts ...Opt) (trace.SpanExporter, error) {
 	e := &exporter{}
-	opts = append([]common.Opt{common.WithTimeFormat(time.RFC3339Nano)}, opts...)
-	if err := common.InitExporter(e, opts...); err != nil {
-		return nil, fmt.Errorf("create new OpenCensus exporter: %w", err)
+	opts = append([]Opt{WithTimeFormat(time.RFC3339Nano)}, opts...)
+	for _, o := range opts {
+		if err := o(e); err != nil {
+			return nil, err
+		}
+	}
+	if err := e.c.Validate(); err != nil {
+		return nil, err
 	}
 	return e, nil
 }
@@ -80,7 +69,7 @@ func (e *exporter) ExportSpans(ctx context.Context, spans []trace.ReadOnlySpan) 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if e.IsClosed() {
+		if e.c.IsClosed() {
 			return nil
 		}
 
@@ -89,60 +78,70 @@ func (e *exporter) ExportSpans(ctx context.Context, spans []trace.ReadOnlySpan) 
 		if st.Code == codes.Error {
 			level = etw.LevelError
 		}
-		if !e.Provider().IsEnabledForLevel(level) {
+		if !e.c.Provider.IsEnabledForLevel(level) {
 			continue
 		}
 
-		name := span.Name()
 		sc := span.SpanContext()
+		psc := span.Parent()
 		rsc := span.Resource()
 		il := span.InstrumentationLibrary()
 		attrs := span.Attributes()
 
 		// extra room for two more options in addition to log level to avoid reallocating
 		// if the user also provides options
-		opts := make([]etw.EventOpt, 0, 3)
+		opts := make([]etw.EventOpt, 0, 5)
 		opts = append(opts, etw.WithLevel(level))
-		opts = append(opts, e.GetEventsOpts(span)...)
+		if e.c.EnableActivityID {
+			opts = append(opts, etw.WithActivityID(common.SpanIDToGUID(sc.SpanID())))
+		}
+		if e.c.EnableRelatedActivityID {
+			opts = append(opts, etw.WithRelatedActivityID(common.SpanIDToGUID(psc.SpanID())))
+		}
+		opts = append(opts, e.c.GetEventsOpts(span)...)
 
 		// Reserve extra space for the span properties .
-		fields := make([]etw.FieldOpt, 0, 9+rsc.Len()+2+len(attrs)+3)
-		fields = append(fields,
-			etw.StringField("span.trace_id", sc.TraceID().String()),
-			etw.StringField("span.parent_id", span.Parent().SpanID().String()),
-			etw.StringField("span.id", sc.SpanID().String()),
-			e.FormatTime("span.start_time", span.StartTime()),
-			e.FormatTime("span.end_time", span.EndTime()),
-			etw.StringField("span.duration", span.EndTime().Sub(span.StartTime()).String()),
+		efs := make([]etw.FieldOpt, 0, 12+rsc.Len()+2+len(attrs)+3)
+		efs = append(efs,
+			etw.StringField(fields.PayloadName, span.Name()),
+			etw.StringField(fields.SpanParentID, psc.SpanID().String()),
+			etw.StringField(fields.SpanID, sc.SpanID().String()),
+			etw.StringField(fields.TraceID, sc.TraceID().String()),
+			e.c.FormatTime(fields.StartTime, span.StartTime()),
+			etw.Int64Field(fields.Time, span.StartTime().UnixMilli()),
+			e.c.FormatTime(fields.EndTime, span.EndTime()),
+			etw.StringField(fields.Duration, span.EndTime().Sub(span.StartTime()).String()),
 		)
+		if sk := span.SpanKind(); sk != oteltrace.SpanKindUnspecified && sk != oteltrace.SpanKindInternal {
+			efs = append(efs, etw.StringField(fields.SpanKind, sk.String()))
+		}
 
 		if st.Code != codes.Unset {
-			fields = append(fields, etw.StringField("otel.status_code", span.Status().Code.String()))
+			efs = append(efs,
+				etw.BoolField(fields.Success, st.Code == codes.Ok),
+				etw.Uint32Field(fields.StatusCode, uint32(st.Code)),
+			)
 			if st.Description != "" {
-				fields = append(fields, etw.StringField("span.status_description", span.Status().Description))
+				efs = append(efs, etw.StringField(fields.StatusMessage, st.Description))
 			}
 		}
 
-		if sk := span.SpanKind(); sk != oteltrace.SpanKindUnspecified && sk != oteltrace.SpanKindInternal {
-			fields = append(fields, etw.StringField("span.kind", sk.String()))
-		}
+		efs = append(efs, resourcesToFields(rsc)...)
+		efs = append(efs, libToFields(il)...)
 
-		fields = append(fields, resourcesToFields(rsc)...)
-		fields = append(fields, libToFields(il)...)
-
-		fields = append(fields, attributesToFields(attrs)...)
+		efs = append(efs, attributesToFields(attrs)...)
 
 		if n := span.DroppedAttributes(); n > 0 {
-			fields = append(fields, etw.IntField("otel.dropped_attributes_count", n))
+			efs = append(efs, etw.IntField("otel.dropped_attributes_count", n))
 		}
 		if n := span.DroppedEvents(); n > 0 {
-			fields = append(fields, etw.IntField("otel.dropped_events_count", n))
+			efs = append(efs, etw.IntField("otel.dropped_events_count", n))
 		}
 		if n := span.DroppedLinks(); n > 0 {
-			fields = append(fields, etw.IntField("otel.dropped_links_count", n))
+			efs = append(efs, etw.IntField("otel.dropped_links_count", n))
 		}
 
-		if err := e.Provider().WriteEvent(name, opts, fields); err != nil {
+		if err := e.c.Provider.WriteEvent(fields.SpanEventName, opts, efs); err != nil {
 			return err
 		}
 
@@ -254,7 +253,7 @@ func (e *exporter) exportSpanEvents(ctx context.Context, span trace.ReadOnlySpan
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if e.IsClosed() {
+		if e.c.IsClosed() {
 			return nil
 		}
 
@@ -262,7 +261,7 @@ func (e *exporter) exportSpanEvents(ctx context.Context, span trace.ReadOnlySpan
 		fields := make([]etw.FieldOpt, 0, 2+len(base)+len(attrs)+1)
 		fields = append(fields,
 			etw.StringField("event.name", evt.Name),
-			e.FormatTime("event.time", evt.Time),
+			e.c.FormatTime("event.time", evt.Time),
 		)
 		fields = append(fields, base...)
 		fields = append(fields, attributesToFields(attrs)...)
@@ -270,7 +269,7 @@ func (e *exporter) exportSpanEvents(ctx context.Context, span trace.ReadOnlySpan
 			fields = append(fields, etw.IntField("otel.dropped_attributes_count", n))
 		}
 
-		if err := e.Provider().WriteEvent(name, opts, fields); err != nil {
+		if err := e.c.Provider.WriteEvent(name, opts, fields); err != nil {
 			return err
 		}
 	}
@@ -278,5 +277,5 @@ func (e *exporter) exportSpanEvents(ctx context.Context, span trace.ReadOnlySpan
 }
 
 func (e *exporter) Shutdown(ctx context.Context) error {
-	return e.Close(ctx)
+	return e.c.Close(ctx)
 }

@@ -9,7 +9,7 @@ import (
 
 	"go.opencensus.io/trace"
 
-	common "github.com/Microsoft/go-winio/internal/etw/exporter"
+	common "github.com/Microsoft/go-winio/internal/etw/exporters"
 	"github.com/Microsoft/go-winio/pkg/etw"
 )
 

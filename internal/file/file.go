@@ -248,7 +248,6 @@ type deadline interface {
 // https://cs.opensource.google/go/go/+/master:src/runtime/netpoll.go;drc=bf2ef26be3593d24487311576d85ec601185fbf4;l=103
 // https://cs.opensource.google/go/go/+/master:src/runtime/netpoll.go;drc=bf2ef26be3593d24487311576d85ec601185fbf4;l=326
 
-// a stripped down, resettable timer that can be viewed as a [context.Context] created via
 type deadlineHandler struct {
 	setLock     sync.Mutex
 	channel     emptyCh

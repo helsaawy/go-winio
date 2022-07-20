@@ -107,17 +107,9 @@ func (f *runtimeFunc) Load() error {
 	return f.err
 }
 
-var (
-	// todo: add `AcceptEx` and `GetAcceptExSockaddrs`
-	WSAID_CONNECTEX = guid.GUID{ //nolint:revive,stylecheck
-		Data1: 0x25a207b9,
-		Data2: 0xddf3,
-		Data3: 0x4660,
-		Data4: [8]byte{0x8e, 0xe9, 0x76, 0xe5, 0x8c, 0x74, 0x06, 0x3e},
-	}
+// todo: add `AcceptEx` and `GetAcceptExSockaddrs`
 
-	connectExFunc = runtimeFunc{id: WSAID_CONNECTEX}
-)
+var connectExFunc = runtimeFunc{id: guid.GUID(windows.WSAID_CONNECTEX)}
 
 func ConnectEx(fd windows.Handle, rsa RawSockaddr, sendBuf *byte, sendDataLen uint32, bytesSent *uint32, overlapped *windows.Overlapped) error {
 	if err := connectExFunc.Load(); err != nil {

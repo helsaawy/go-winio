@@ -88,6 +88,11 @@ func (d *Deadline) Stop() error {
 	defer d.mu.Unlock()
 	// update nano so that closeCh can execute
 	d.nano = now()
+
+	if d.t == nil {
+		d._closeCh()
+		return nil
+	}
 	d.t.Stop()
 	<-d.ch
 	return nil
@@ -136,7 +141,11 @@ func (d *Deadline) Reset(t time.Time) error {
 func (d *Deadline) closeCh() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d._closeCh()
+}
 
+// closeCh, but requires caller to have mu
+func (d *Deadline) _closeCh() {
 	// Only close d.ch if the deadline (d.nano) is non-zero (ie, is a valid deadline) and the
 	// current time is after the deadline.
 	// See `Reset` for more.

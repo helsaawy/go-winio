@@ -15,6 +15,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/Microsoft/go-winio/internal/deadline"
 	"github.com/Microsoft/go-winio/internal/file"
 )
 
@@ -211,7 +212,7 @@ func DialPipe(path string, timeout *time.Duration) (net.Conn, error) {
 	}
 	ctx, _ := context.WithDeadline(context.Background(), absTimeout)
 	conn, err := DialPipeContext(ctx, path)
-	if err == context.DeadlineExceeded {
+	if errors.Is(err, context.DeadlineExceeded) {
 		return nil, ErrTimeout
 	}
 	return conn, err
@@ -472,7 +473,7 @@ func connectPipe(p *file.Win32File) error {
 	defer c.Close()
 
 	err = connectNamedPipe(p.Handle, &c.O)
-	_, err = p.AsyncIo(c, nil, 0, err)
+	_, err = p.AsyncIo(deadline.Empty(), c, 0, err)
 	if err != nil && err != cERROR_PIPE_CONNECTED {
 		return err
 	}

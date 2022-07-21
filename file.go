@@ -6,12 +6,13 @@ import (
 	"io"
 	"syscall"
 
+	"github.com/Microsoft/go-winio/internal/deadline"
 	"github.com/Microsoft/go-winio/internal/file"
 )
 
 var (
 	ErrFileClosed = file.ErrFileClosed
-	ErrTimeout    = file.ErrTimeout
+	ErrTimeout    = deadline.ErrDeadlineExceeded
 )
 
 func MakeOpenFile(h syscall.Handle) (io.ReadWriteCloser, error) {

@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/Microsoft/go-winio/internal/deadline"
 	"github.com/Microsoft/go-winio/internal/file"
 	"github.com/Microsoft/go-winio/internal/socket"
 	"github.com/Microsoft/go-winio/pkg/guid"
@@ -246,7 +247,7 @@ func (l *HvsockListener) Accept() (_ net.Conn, err error) {
 
 	var bytes uint32
 	err = syscall.AcceptEx(l.sock.Handle, sock.Handle, &addrbuf[0], 0 /*rxdatalen*/, addrlen, addrlen, &bytes, &c.O)
-	if _, err = l.sock.AsyncIo(c, nil, bytes, err); err != nil {
+	if _, err = l.sock.AsyncIo(deadline.Empty(), c, bytes, err); err != nil {
 		return nil, l.opErr("accept", os.NewSyscallError("acceptex", err))
 	}
 
@@ -351,7 +352,7 @@ func (d *HvsockDialer) Dial(ctx context.Context, addr *HvsockAddr) (conn *Hvsock
 			0,   // sendDataLen
 			&bytes,
 			(*windows.Overlapped)(unsafe.Pointer(&c.O)))
-		_, err = sock.AsyncIo(c, ctx, bytes, err)
+		_, err = sock.AsyncIo(ctx, c, bytes, err)
 		if i < d.Retries && canRedial(err) {
 			if err = d.redialWait(ctx); err == nil {
 				continue
@@ -448,7 +449,7 @@ func (conn *HvsockConn) Read(b []byte) (int, error) {
 	buf := syscall.WSABuf{Buf: &b[0], Len: uint32(len(b))}
 	var flags, bytes uint32
 	err = syscall.WSARecv(conn.sock.Handle, &buf, 1, &bytes, &flags, &c.O, nil)
-	n, err := conn.sock.AsyncIo(c, &conn.sock.ReadDeadline, bytes, err)
+	n, err := conn.sock.AsyncIo(conn.sock.ReadDeadline, c, bytes, err)
 	if err != nil {
 		var eno windows.Errno
 		if errors.As(err, &eno) {
@@ -483,7 +484,7 @@ func (conn *HvsockConn) write(b []byte) (int, error) {
 	buf := syscall.WSABuf{Buf: &b[0], Len: uint32(len(b))}
 	var bytes uint32
 	err = syscall.WSASend(conn.sock.Handle, &buf, 1, &bytes, 0, &c.O, nil)
-	n, err := conn.sock.AsyncIo(c, &conn.sock.WriteDeadline, bytes, err)
+	n, err := conn.sock.AsyncIo(conn.sock.WriteDeadline, c, bytes, err)
 	if err != nil {
 		var eno windows.Errno
 		if errors.As(err, &eno) {

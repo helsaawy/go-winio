@@ -1,3 +1,9 @@
 package time
 
-// todo
+import (
+	"testing"
+)
+
+func TestNow(t *testing.T) {
+	// todo
+}

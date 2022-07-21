@@ -1,4 +1,6 @@
-package time
+// This package implements [Deadline] for adding timeouts to (IO) operations that can
+// be reset or updated as needed.
+package deadline
 
 import (
 	"context"
@@ -11,17 +13,27 @@ import (
 type emptyCh = chan struct{}
 type doneCh = <-chan struct{}
 
-var ErrUninitialized = errors.New("cannot reset an uninitialized deadline")
+type deadlineExceededError struct{}
 
+func (deadlineExceededError) Error() string   { return "deadline exceeded" }
+func (deadlineExceededError) Timeout() bool   { return true }
+func (deadlineExceededError) Temporary() bool { return true }
+
+// ErrDeadlineExceeded is the error returned by [Deadline.Err] when it [Deadline] expires.
+var ErrDeadlineExceeded error = deadlineExceededError{}
+var ErrUninitialized = errors.New("uninitialized deadline")
+
+// Timeout is a subset of [context.Context], and allows for cancellation/timeouts to
+// be propagated.
 type Timeout interface {
 	Deadline() (time.Time, bool)
 	Done() doneCh
+	Err() error
 }
 
 var _ Timeout = context.Background()
 
-// Deadline is a resettable timer.
-// Must be created via [NewDeadline].
+// Deadline is a resettable timer; it must be created via [NewDeadline].
 // To wait on a deadline, use [<-Deadline.Done()].
 //
 // A Deadline does not distinguish between a reaching the specified deadline and calling
@@ -44,9 +56,9 @@ type Deadline struct {
 
 var _ Timeout = &Deadline{}
 
-// NewDeadline creates a [Deadline] that expires at [time.Time] t. If t is zero,
+// New creates a [Deadline] that expires at [time.Time] t. If t is zero,
 // the [Deadline] never expires. If t is in the past, the Deadline executes immediately.
-func NewDeadline(t time.Time) *Deadline {
+func New(t time.Time) *Deadline {
 	d := &Deadline{
 		ch:   make(emptyCh),
 		nano: nano(t),
@@ -58,12 +70,18 @@ func NewDeadline(t time.Time) *Deadline {
 	return d
 }
 
+// Empty returns a [Deadline] that does not expire.
+// It is equivalent to calling [New] with a zero timestamp
+func Empty() *Deadline {
+	return New(time.Time{})
+}
+
 // Cancels the deadline, stopping the underlying timer and notifying waiters.
 // This function updates the value returned by [Deadline.Deadline] and waits until
 // [Deadline.Done] returns.
 func (d *Deadline) Stop() error {
 	if d == nil {
-		return fmt.Errorf("cannot stop an uninitialized deadline")
+		return fmt.Errorf("unable to stop deadline: %w", ErrUninitialized)
 	}
 
 	d.mu.Lock()
@@ -79,7 +97,7 @@ func (d *Deadline) Stop() error {
 // it will not signal pending operations and will remain active.
 func (d *Deadline) Reset(t time.Time) error {
 	if d == nil {
-		return fmt.Errorf("cannot reset an uninitialized deadline")
+		return fmt.Errorf("unable to reset deadline: %w", ErrUninitialized)
 	}
 
 	d.mu.Lock()
@@ -156,6 +174,40 @@ func (d *Deadline) Deadline() (t time.Time, ok bool) {
 		return t, ok
 	}
 	return time.Unix(0, d.nano), true
+}
+
+func (d *Deadline) Err() error {
+	if d == nil {
+		return ErrUninitialized
+	}
+
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if closed(d.ch) {
+		return ErrDeadlineExceeded
+	}
+	return nil
+}
+
+// Context returns a [context.Context] that will propagate the current status of the [Deadline]
+// to child contexts.
+// The [context.Done] channel will stay current with the current deadline so long as the
+// spawning [Deadline] does not expire.
+// Once the parent [Deadline] expires, this this context will be cancelled and will not reflect
+// new timeouts.
+//
+// Since the [Deadline] expiration timestamp may change, the returned [context.Context] does
+// not return a valid deadline for [Context.Deadline], to prevent issues with child contexts.
+func (d *Deadline) Context() context.Context {
+	if d == nil {
+		return context.Background()
+	}
+
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return &fakeContext{
+		ch: d.ch,
+	}
 }
 
 // checks if ch is closed

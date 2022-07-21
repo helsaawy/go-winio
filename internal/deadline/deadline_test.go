@@ -1,9 +1,11 @@
-package time
+package deadline
 
 import (
 	"testing"
 )
 
 func TestNow(t *testing.T) {
-	// todo
+	a := *Empty()
+	b := a
+	<-b.Done()
 }

@@ -12,7 +12,7 @@ import (
 // this implementation is based off of sync atomic's new bool
 // https://cs.opensource.google/go/go/+/refs/tags/go1.19rc2:src/sync/atomic/type.go;l=11
 type AtomicBool struct {
-	_ noCopy
+	_ NoCopy
 
 	v uint32
 }
@@ -40,7 +40,7 @@ func bu32(b bool) (u uint32) {
 //  - the value is valid if it does not equal [golang.org/x/sys/windows.InvalidHandle]
 //  - the value is set if it does not equal windows.Handle(0)
 type AtomicHandle struct {
-	_ noCopy
+	_ NoCopy
 
 	v uintptr
 }
@@ -57,7 +57,7 @@ func (x *AtomicHandle) CompareAndSwap(old, new windows.Handle) (swapped bool) { 
 // LazyHandle is a Handle that is initialized on the first call, using the same
 // semantics as [AtomicHandle]. It is based off of [golang.org/x/sys/windows.LazyProc].
 type LazyHandle struct {
-	_ noCopy
+	_ NoCopy
 
 	f    func()
 	once sync.Once
@@ -94,14 +94,14 @@ func (x *LazyHandle) Handle() windows.Handle {
 	return x.h
 }
 
-// noCopy can be added which must not be copied after the first use.
+// NoCopy can be added which must not be copied after the first use.
 //
 // Requires checking via `go vet -copylocks`
 //
 // copied from sync/atomic/type.go
 // https://cs.opensource.google/go/go/+/refs/tags/go1.19rc2:src/sync/atomic/type.go;l=182
-type noCopy struct{}
+type NoCopy struct{}
 
 // Lock is a no-op used by -copylocks checker from `go vet`.
-func (*noCopy) Lock()   {}
-func (*noCopy) Unlock() {}
+func (*NoCopy) Lock()   {}
+func (*NoCopy) Unlock() {}

@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/Microsoft/go-winio/internal/deadline"
 	isync "github.com/Microsoft/go-winio/internal/sync"
 )
 
@@ -26,23 +27,14 @@ const (
 	skipSetEventOnHandle        = 2
 )
 
-var (
-	ErrFileClosed = errors.New("file has already been closed")
-	ErrTimeout    = &timeoutError{}
-)
-
-type timeoutError struct{}
-
-func (e *timeoutError) Error() string   { return "i/o timeout" }
-func (e *timeoutError) Timeout() bool   { return true }
-func (e *timeoutError) Temporary() bool { return true }
+var ErrFileClosed = errors.New("file has already been closed")
 
 // Win32File implements Reader, Writer, and Closer on a Win32 handle without blocking in a syscall.
 // It takes ownership of this handle and will close it if it is garbage collected.
 type Win32File struct {
 	Handle        syscall.Handle
-	ReadDeadline  deadlineHandler
-	WriteDeadline deadlineHandler
+	ReadDeadline  *deadline.Deadline
+	WriteDeadline *deadline.Deadline
 
 	isSocket bool
 	// wgLock should be locked when closing or adding new operations to prevent new operations
@@ -59,8 +51,8 @@ var _ io.ReadWriteCloser = &Win32File{}
 func MakeWin32File(h syscall.Handle, socket bool) (*Win32File, error) {
 	f := &Win32File{
 		Handle:        h,
-		ReadDeadline:  newDeadlineHandler(),
-		WriteDeadline: newDeadlineHandler(),
+		ReadDeadline:  deadline.Empty(),
+		WriteDeadline: deadline.Empty(),
 	}
 	if err := createFileIoCompletionPort(windows.Handle(h)); err != nil {
 		return nil, err
@@ -113,7 +105,7 @@ func (f *Win32File) PrepareIo() (*IoOperation, error) {
 
 // AsyncIo processes the return value from ReadFile or WriteFile, blocking until
 // the operation has actually completed.
-func (f *Win32File) AsyncIo(c *IoOperation, d deadline, bytes uint32, err error) (int, error) {
+func (f *Win32File) AsyncIo(d deadline.Timeout, c *IoOperation, bytes uint32, err error) (int, error) {
 	//nolint:errorlint
 	if err != syscall.ERROR_IO_PENDING {
 		return int(bytes), err
@@ -127,7 +119,7 @@ func (f *Win32File) AsyncIo(c *IoOperation, d deadline, bytes uint32, err error)
 	select {
 	case r = <-c.ch:
 		err = r.err
-		if err == syscall.ERROR_OPERATION_ABORTED {
+		if errnoIs(err, windows.ERROR_OPERATION_ABORTED) {
 			if f.closing.IsSet() {
 				err = ErrFileClosed
 			}
@@ -140,8 +132,8 @@ func (f *Win32File) AsyncIo(c *IoOperation, d deadline, bytes uint32, err error)
 		cancelIoEx(f.Handle, &c.O) //nolint:errcheck
 		r = <-c.ch
 		err = r.err
-		if err == syscall.ERROR_OPERATION_ABORTED {
-			err = ErrTimeout
+		if errnoIs(err, windows.ERROR_OPERATION_ABORTED) {
+			err = deadline.ErrDeadlineExceeded
 		}
 	}
 
@@ -161,13 +153,13 @@ func (f *Win32File) Read(b []byte) (int, error) {
 	}
 	defer c.Close()
 
-	if f.ReadDeadline.timedout.IsSet() {
-		return 0, ErrTimeout
+	if err = f.ReadDeadline.Err(); err != nil {
+		return 0, err
 	}
 
 	var bytes uint32
 	err = syscall.ReadFile(f.Handle, b, &bytes, &c.O)
-	n, err := f.AsyncIo(c, &f.ReadDeadline, bytes, err)
+	n, err := f.AsyncIo(f.ReadDeadline, c, bytes, err)
 	// todo: is this needed for reads, since should AsyncIo block until the data is read from b
 	runtime.KeepAlive(b)
 
@@ -189,13 +181,13 @@ func (f *Win32File) Write(b []byte) (int, error) {
 	}
 	defer c.Close()
 
-	if f.WriteDeadline.timedout.IsSet() {
-		return 0, ErrTimeout
+	if err = f.WriteDeadline.Err(); err != nil {
+		return 0, err
 	}
 
 	var bytes uint32
 	err = syscall.WriteFile(f.Handle, b, &bytes, &c.O)
-	n, err := f.AsyncIo(c, &f.WriteDeadline, bytes, err)
+	n, err := f.AsyncIo(f.WriteDeadline, c, bytes, err)
 	runtime.KeepAlive(b)
 	return n, err
 }
@@ -212,11 +204,11 @@ func (f *Win32File) SetDeadline(t time.Time) error {
 }
 
 func (f *Win32File) SetReadDeadline(deadline time.Time) error {
-	return f.ReadDeadline.set(deadline)
+	return f.ReadDeadline.Reset(deadline)
 }
 
 func (f *Win32File) SetWriteDeadline(deadline time.Time) error {
-	return f.WriteDeadline.set(deadline)
+	return f.WriteDeadline.Reset(deadline)
 }
 
 func (f *Win32File) Flush() error {
@@ -236,81 +228,8 @@ func (f *Win32File) OSFile(name string) *os.File {
 	return os.NewFile(f.Fd(), name)
 }
 
-type emptyCh chan struct{}
-type blockChan = <-chan struct{}
-
-type deadline interface {
-	Done() blockChan
-}
-
-// TODO:
-// https://cs.opensource.google/go/go/+/refs/tags/go1.18.4:src/internal/poll/fd_poll_runtime.go;l=28;drc=bf2ef26be3593d24487311576d85ec601185fbf4;bpv=0;bpt=1
-// https://cs.opensource.google/go/go/+/master:src/runtime/netpoll.go;drc=bf2ef26be3593d24487311576d85ec601185fbf4;l=103
-// https://cs.opensource.google/go/go/+/master:src/runtime/netpoll.go;drc=bf2ef26be3593d24487311576d85ec601185fbf4;l=326
-
-type deadlineHandler struct {
-	setLock     sync.Mutex
-	channel     emptyCh
-	channelLock sync.RWMutex
-	timer       *time.Timer
-	timedout    isync.AtomicBool
-}
-
-var _ deadline = &deadlineHandler{}
-
-func newDeadlineHandler() deadlineHandler {
-	return deadlineHandler{
-		channel: make(emptyCh),
-	}
-}
-
-func (d *deadlineHandler) Done() blockChan {
-	if d == nil {
-		return make(emptyCh)
-	}
-
-	d.channelLock.Lock()
-	defer d.channelLock.Unlock()
-	return d.channel
-}
-
-func (d *deadlineHandler) set(deadline time.Time) error {
-	d.setLock.Lock()
-	defer d.setLock.Unlock()
-
-	if d.timer != nil {
-		if !d.timer.Stop() {
-			<-d.channel
-		}
-		d.timer = nil
-	}
-	d.timedout.SetFalse()
-
-	select {
-	case <-d.channel:
-		d.channelLock.Lock()
-		d.channel = make(emptyCh)
-		d.channelLock.Unlock()
-	default:
-	}
-
-	if deadline.IsZero() {
-		return nil
-	}
-
-	timeoutIO := func() {
-		d.timedout.SetTrue()
-		close(d.channel)
-	}
-
-	now := time.Now()
-	duration := deadline.Sub(now)
-	if deadline.After(now) {
-		// Deadline is in the future, set a timer to wait
-		d.timer = time.AfterFunc(duration, timeoutIO)
-	} else {
-		// Deadline is in the past. Cancel all pending IO now.
-		timeoutIO()
-	}
-	return nil
+// errors.Is, but specialized for windows.Errorno
+func errnoIs(err error, target windows.Errno) bool {
+	n, ok := err.(windows.Errno)
+	return ok && n == target
 }

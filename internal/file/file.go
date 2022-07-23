@@ -3,7 +3,6 @@
 package file
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +14,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/Microsoft/go-winio/internal/deadline"
+	"github.com/Microsoft/go-winio/internal/handle"
 	isync "github.com/Microsoft/go-winio/internal/sync"
 )
 
@@ -27,7 +27,7 @@ const (
 	skipSetEventOnHandle        = 2
 )
 
-var ErrFileClosed = errors.New("file has already been closed")
+var ErrFileClosed = os.ErrClosed
 
 // Win32File implements Reader, Writer, and Closer on a Win32 handle without blocking in a syscall.
 // It takes ownership of this handle and will close it if it is garbage collected.
@@ -46,8 +46,7 @@ type Win32File struct {
 }
 
 var _ io.ReadWriteCloser = &Win32File{}
-
-// MakeWin32File makes a new win32File from an existing file handle
+// MakeWin32File makes a new win32File from an existing file handle (eg, from the result of [CreateFile]).
 func MakeWin32File(h syscall.Handle, socket bool) (*Win32File, error) {
 	f := &Win32File{
 		Handle:        h,
@@ -140,10 +139,12 @@ func (f *Win32File) AsyncIo(d deadline.Timeout, c *IoOperation, bytes uint32, er
 	// runtime.KeepAlive is needed, as c is passed via native
 	// code to ioCompletionProcessor, c must remain alive
 	// until the channel read is complete.
-	// todo: (de)allocate *ioOperation via win32 heap functions, instead of needing to KeepAlive?
+	// todo: allocate *ioOperation via win32 heap functions, instead of needing to KeepAlive?
 	runtime.KeepAlive(c)
 	return int(r.bytes), err
 }
+
+//todo: create `StartRead([]byte) <-chan IOResult` (and `StartWrite(`  version) that expose async operations
 
 // Read reads from a file handle.
 func (f *Win32File) Read(b []byte) (int, error) {
@@ -223,9 +224,13 @@ func (f *Win32File) Fd() uintptr {
 	return uintptr(f.Handle)
 }
 
-// OSFile returns an [os.File] with the same underlying handle.
-func (f *Win32File) OSFile(name string) *os.File {
-	return os.NewFile(f.Fd(), name)
+// OSFile returns an [os.File] with a duplicated handle.
+func (f *Win32File) OSFile(name string) (*os.File, error) {
+	h, err := handle.Duplicate(windows.Handle(f.Handle))
+	if err != nil {
+		return nil, err
+	}
+	return os.NewFile(uintptr(h), name), nil
 }
 
 // errors.Is, but specialized for windows.Errorno

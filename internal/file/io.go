@@ -10,10 +10,11 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-//sys getQueuedCompletionStatus(port windows.Handle, bytes *uint32, key *uintptr, o **ioOperation, timeout uint32) (err error) = GetQueuedCompletionStatus
+//sys getQueuedCompletionStatus(port windows.Handle, bytes *uint32, key *uintptr, o **IoOperation, timeout uint32) (err error) = GetQueuedCompletionStatus
 //sys createIoCompletionPort(file windows.Handle, port windows.Handle, key uintptr, threadCount uint32) (newport windows.Handle, err error) = CreateIoCompletionPort
 
-var _ioProcessor = ioCompletionProcessor{}
+// global processor
+var _processor ioCompletionProcessor
 
 type ioCompletionProcessor struct {
 	// h is the I/O completion port
@@ -23,11 +24,11 @@ type ioCompletionProcessor struct {
 }
 
 func (p *ioCompletionProcessor) port() windows.Handle {
-	p.do()
+	p.init()
 	return p.h
 }
 
-func (p *ioCompletionProcessor) do() {
+func (p *ioCompletionProcessor) init() {
 	p.once.Do(func() {
 		var err error
 		p.h, err = createIoCompletionPort(windows.InvalidHandle, 0, 0, 0xffffffff)
@@ -55,7 +56,7 @@ func (p *ioCompletionProcessor) start() {
 
 func createFileIoCompletionPort(h windows.Handle) error {
 	// can ignore the returned port handle since it will be equal to the existing IO completion port
-	_, err := createIoCompletionPort(h, _ioProcessor.port(), 0, 0xffffffff)
+	_, err := createIoCompletionPort(h, _processor.port(), 0, 0xffffffff)
 	return err
 }
 

@@ -44,6 +44,7 @@ var (
 	modws2_32   = windows.NewLazySystemDLL("ws2_32.dll")
 
 	procCancelIoEx                         = modkernel32.NewProc("CancelIoEx")
+	procCreateFileW                        = modkernel32.NewProc("CreateFileW")
 	procCreateIoCompletionPort             = modkernel32.NewProc("CreateIoCompletionPort")
 	procGetQueuedCompletionStatus          = modkernel32.NewProc("GetQueuedCompletionStatus")
 	procSetFileCompletionNotificationModes = modkernel32.NewProc("SetFileCompletionNotificationModes")
@@ -53,6 +54,24 @@ var (
 func cancelIoEx(file syscall.Handle, o *syscall.Overlapped) (err error) {
 	r1, _, e1 := syscall.Syscall(procCancelIoEx.Addr(), 2, uintptr(file), uintptr(unsafe.Pointer(o)), 0)
 	if r1 == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func CreateFile(name string, access AccessMask, mode ShareMode, sa *windows.SecurityAttributes, createmode CreationDisposition, attrs FlagOrAttribute, template windows.Handle) (handle windows.Handle, err error) {
+	var _p0 *uint16
+	_p0, err = syscall.UTF16PtrFromString(name)
+	if err != nil {
+		return
+	}
+	return _CreateFile(_p0, access, mode, sa, createmode, attrs, template)
+}
+
+func _CreateFile(name *uint16, access AccessMask, mode ShareMode, sa *windows.SecurityAttributes, createmode CreationDisposition, attrs FlagOrAttribute, template windows.Handle) (handle windows.Handle, err error) {
+	r0, _, e1 := syscall.Syscall9(procCreateFileW.Addr(), 7, uintptr(unsafe.Pointer(name)), uintptr(access), uintptr(mode), uintptr(unsafe.Pointer(sa)), uintptr(createmode), uintptr(attrs), uintptr(template), 0, 0)
+	handle = windows.Handle(r0)
+	if handle == windows.InvalidHandle {
 		err = errnoErr(e1)
 	}
 	return

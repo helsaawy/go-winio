@@ -13,21 +13,21 @@ import (
 //   [in] HANDLE hSecondObjectHandle
 // );
 //
-//sys Compare(one windows.Handle, two windows.Handle) (b bool) = CompareObjectHandles
+//sys Compare(one windows.Handle, two windows.Handle) (b bool) = Kernelbase.CompareObjectHandles
 
 // BOOL GetHandleInformation(
 //   [in]  HANDLE  hObject,
 //   [out] LPDWORD lpdwFlags
 // );
 //
-//sys getHandleInformation(h windows.Handle, i *Flags) (err error) [failretval != 0] = GetHandleInformation
-
-const (
-	Inherit          = 0x1
-	ProtectFromClose = 0x2
-)
+//sys getHandleInformation(h windows.Handle, i *Flags) (err error) [failretval == 0] = GetHandleInformation
 
 type Flags uint32
+
+const (
+	Inherit          Flags = 0x1
+	ProtectFromClose Flags = 0x2
+)
 
 func (f Flags) Inherit() bool {
 	return f&Inherit != 0

@@ -65,11 +65,11 @@ const (
 type CreationDisposition uint32
 
 const (
-	CreateNew        = 1
-	CreateAlways     = 2
-	OpenExisting     = 3
-	OpenAlways       = 4
-	TruncateExisting = 5
+	CreateNew        CreationDisposition = 1
+	CreateAlways     CreationDisposition = 2
+	OpenExisting     CreationDisposition = 3
+	OpenAlways       CreationDisposition = 4
+	TruncateExisting CreationDisposition = 5
 )
 
 // https://docs.microsoft.com/en-us/windows/win32/fileio/file-attribute-constants
@@ -77,52 +77,52 @@ const (
 type FlagOrAttribute uint32
 
 const (
-	AttributeReadonly           = 0x00000001
-	AttributeHidden             = 0x00000002
-	AttributeSystem             = 0x00000004
-	AttributeDirectory          = 0x00000010
-	AttributeArchive            = 0x00000020
-	AttributeDevice             = 0x00000040
-	AttributeNormal             = 0x00000080
-	AttributeTemporary          = 0x00000100
-	AttributeSparseFile         = 0x00000200
-	AttributeReparsePoint       = 0x00000400
-	AttributeCompressed         = 0x00000800
-	AttributeOffline            = 0x00001000
-	AttributeNotContentIndexed  = 0x00002000
-	AttributeEncrypted          = 0x00004000
-	AttributeIntegrityStream    = 0x00008000
-	AttributeVirtual            = 0x00010000
-	AttributeNoScrubData        = 0x00020000
-	AttributeEA                 = 0x00040000
-	AttributeRecallOnOpen       = 0x00040000
-	AttributeRecallOnDataAccess = 0x00400000
-	AttributePinned             = 0x00080000
-	AttributeUnpinned           = 0x00100000
-	AttributeStrictlySequential = 0x20000000
+	AttributeReadonly           FlagOrAttribute = 0x00000001
+	AttributeHidden             FlagOrAttribute = 0x00000002
+	AttributeSystem             FlagOrAttribute = 0x00000004
+	AttributeDirectory          FlagOrAttribute = 0x00000010
+	AttributeArchive            FlagOrAttribute = 0x00000020
+	AttributeDevice             FlagOrAttribute = 0x00000040
+	AttributeNormal             FlagOrAttribute = 0x00000080
+	AttributeTemporary          FlagOrAttribute = 0x00000100
+	AttributeSparseFile         FlagOrAttribute = 0x00000200
+	AttributeReparsePoint       FlagOrAttribute = 0x00000400
+	AttributeCompressed         FlagOrAttribute = 0x00000800
+	AttributeOffline            FlagOrAttribute = 0x00001000
+	AttributeNotContentIndexed  FlagOrAttribute = 0x00002000
+	AttributeEncrypted          FlagOrAttribute = 0x00004000
+	AttributeIntegrityStream    FlagOrAttribute = 0x00008000
+	AttributeVirtual            FlagOrAttribute = 0x00010000
+	AttributeNoScrubData        FlagOrAttribute = 0x00020000
+	AttributeEA                 FlagOrAttribute = 0x00040000
+	AttributeRecallOnOpen       FlagOrAttribute = 0x00040000
+	AttributeRecallOnDataAccess FlagOrAttribute = 0x00400000
+	AttributePinned             FlagOrAttribute = 0x00080000
+	AttributeUnpinned           FlagOrAttribute = 0x00100000
+	AttributeStrictlySequential FlagOrAttribute = 0x20000000
 
-	FlagWriteThrough        = 0x80000000
-	FlagOverlapped          = 0x40000000
-	FlagNoBuffering         = 0x20000000
-	FlagRandomAccess        = 0x10000000
-	FlagSequentialScan      = 0x08000000
-	FlagDeleteOnClose       = 0x04000000
-	FlagBackupSemantics     = 0x02000000
-	FlagPosixSemantics      = 0x01000000
-	FlagSessionAware        = 0x00800000
-	FlagOpenReparsePoint    = 0x00200000
-	FlagOpenNoRecall        = 0x00100000
-	FlagFirstPipeInstance   = 0x00080000
-	FlagOpenRequiringOplock = 0x00040000
+	FlagWriteThrough        FlagOrAttribute = 0x80000000
+	FlagOverlapped          FlagOrAttribute = 0x40000000
+	FlagNoBuffering         FlagOrAttribute = 0x20000000
+	FlagRandomAccess        FlagOrAttribute = 0x10000000
+	FlagSequentialScan      FlagOrAttribute = 0x08000000
+	FlagDeleteOnClose       FlagOrAttribute = 0x04000000
+	FlagBackupSemantics     FlagOrAttribute = 0x02000000
+	FlagPosixSemantics      FlagOrAttribute = 0x01000000
+	FlagSessionAware        FlagOrAttribute = 0x00800000
+	FlagOpenReparsePoint    FlagOrAttribute = 0x00200000
+	FlagOpenNoRecall        FlagOrAttribute = 0x00100000
+	FlagFirstPipeInstance   FlagOrAttribute = 0x00080000
+	FlagOpenRequiringOplock FlagOrAttribute = 0x00040000
 
-	SecurityAnonymous       = 0
-	SecurityIdentification  = 0x00010000
-	SecurityImpersonation   = 0x00020000
-	SecurityDelegation      = 0x00030000
-	SecurityContextTracking = 0x00040000
-	SecurityEffectiveOnly   = 0x00080000
-	SecuritySQOSPresent     = 0x00100000
-	SecurityValidSQOSFlags  = 0x001F0000
+	SecurityAnonymous       FlagOrAttribute = 0
+	SecurityIdentification  FlagOrAttribute = 0x00010000
+	SecurityImpersonation   FlagOrAttribute = 0x00020000
+	SecurityDelegation      FlagOrAttribute = 0x00030000
+	SecurityContextTracking FlagOrAttribute = 0x00040000
+	SecurityEffectiveOnly   FlagOrAttribute = 0x00080000
+	SecuritySQOSPresent     FlagOrAttribute = 0x00100000
+	SecurityValidSQOSFlags  FlagOrAttribute = 0x001F0000
 )
 
 // HANDLE CreateFileW(
@@ -135,12 +135,14 @@ const (
 //   [in, optional] HANDLE                hTemplateFile
 // );
 //
-//sys CreateFile(name string, access AccessMask, mode ShareMode, sa *windows.SecurityAttributes, createmode CreationDisposition, attrs FlagOrAttribute, template windows.Handle) (handle windows.Handle, err error) [failretval==windows.InvalidHandle] = CreateFileW
+//sys CreateFile(name string, access AccessMask, share ShareMode, sa *windows.SecurityAttributes, mode CreationDisposition, attrs FlagOrAttribute, template windows.Handle) (handle windows.Handle, err error) [failretval==windows.InvalidHandle] = CreateFileW
 
-// OpenFile opens (or creates, depending on the flags passed) the file specified by path.
-// It is a simplified version of [CreateFile].
-func OpenFile(path string, access AccessMask, attr FlagOrAttribute) (*Win32File, error) {
-	h, err := CreateFile(path, access, ShareRead|ShareWrite, inheritableSA(), CreateNew, attr, 0)
+// OpenFile opens (or creates, if it does not exits) a file for overlapped (async) IO.
+// It is a simplified version of [CreateFile], and will set [FlagOverlapped] if it is not
+// already enabled.
+func OpenFile(file string, access AccessMask, attr FlagOrAttribute) (*Win32File, error) {
+	attr |= FlagOverlapped
+	h, err := CreateFile(file, access, ShareRead|ShareWrite, inheritableSA(), CreateAlways, attr, 0)
 	if err != nil {
 		return nil, err
 	}

@@ -40,9 +40,10 @@ func errnoErr(e syscall.Errno) error {
 }
 
 var (
-	modkernel32 = windows.NewLazySystemDLL("kernel32.dll")
+	modKernelbase = windows.NewLazySystemDLL("Kernelbase.dll")
+	modkernel32   = windows.NewLazySystemDLL("kernel32.dll")
 
-	procCompareObjectHandles = modkernel32.NewProc("CompareObjectHandles")
+	procCompareObjectHandles = modKernelbase.NewProc("CompareObjectHandles")
 	procGetHandleInformation = modkernel32.NewProc("GetHandleInformation")
 )
 
@@ -54,7 +55,7 @@ func Compare(one windows.Handle, two windows.Handle) (b bool) {
 
 func getHandleInformation(h windows.Handle, i *Flags) (err error) {
 	r1, _, e1 := syscall.Syscall(procGetHandleInformation.Addr(), 2, uintptr(h), uintptr(unsafe.Pointer(i)), 0)
-	if r1 != 0 {
+	if r1 == 0 {
 		err = errnoErr(e1)
 	}
 	return

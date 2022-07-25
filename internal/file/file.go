@@ -14,7 +14,6 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/Microsoft/go-winio/internal/deadline"
-	"github.com/Microsoft/go-winio/internal/handle"
 	isync "github.com/Microsoft/go-winio/internal/sync"
 )
 
@@ -28,6 +27,9 @@ const (
 )
 
 var ErrFileClosed = os.ErrClosed
+
+// todo: ReadFrom, ReadAt, WriteAt, WriteString, Seek
+// todo: GetFinalPathNameByHandleA and get file name from handle; win32file -> path -> os.Open
 
 // Win32File implements Reader, Writer, and Closer on a Win32 handle without blocking in a syscall.
 // It takes ownership of this handle and will close it if it is garbage collected.
@@ -46,6 +48,7 @@ type Win32File struct {
 }
 
 var _ io.ReadWriteCloser = &Win32File{}
+
 // MakeWin32File makes a new win32File from an existing file handle (eg, from the result of [CreateFile]).
 func MakeWin32File(h syscall.Handle, socket bool) (*Win32File, error) {
 	f := &Win32File{
@@ -54,10 +57,10 @@ func MakeWin32File(h syscall.Handle, socket bool) (*Win32File, error) {
 		WriteDeadline: deadline.Empty(),
 	}
 	if err := createFileIoCompletionPort(windows.Handle(h)); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create file IO completion port: %w", err)
 	}
 	if err := setFileCompletionNotificationModes(h, skipCompletionPortOnSuccess|skipSetEventOnHandle); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("set file IO notification mode: %w", err)
 	}
 	return f, nil
 }
@@ -224,17 +227,8 @@ func (f *Win32File) Fd() uintptr {
 	return uintptr(f.Handle)
 }
 
-// OSFile returns an [os.File] with a duplicated handle.
-func (f *Win32File) OSFile(name string) (*os.File, error) {
-	h, err := handle.Duplicate(windows.Handle(f.Handle))
-	if err != nil {
-		return nil, err
-	}
-	return os.NewFile(uintptr(h), name), nil
-}
-
 // errors.Is, but specialized for windows.Errorno
 func errnoIs(err error, target windows.Errno) bool {
-	n, ok := err.(windows.Errno)
+	n, ok := err.(windows.Errno) //nolint:errorlint
 	return ok && n == target
 }

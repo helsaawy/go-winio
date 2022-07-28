@@ -295,8 +295,9 @@ func TestHvSockCloseReadWriteListener(t *testing.T) {
 		//
 		// test CloseWrite()
 		//
-		_, err = c.Write([]byte(testStr))
+		n, err := c.Write([]byte(testStr))
 		u.Must(err, "server tx")
+		u.Assert(n == len(testStr), fmt.Sprintf("server wrote %d bytes, wanted %d", n, len(testStr)))
 
 		u.Must(hv.CloseWrite(), "server close write")
 
@@ -310,8 +311,9 @@ func TestHvSockCloseReadWriteListener(t *testing.T) {
 		// test CloseRead()
 		//
 		b := make([]byte, 256)
-		n, err := c.Read(b)
+		n, err = c.Read(b)
 		u.Must(err, "server read")
+		u.Assert(n == len(testStr), fmt.Sprintf("server read %d bytes, wanted %d", n, len(testStr)))
 		u.Assert(string(b[:n]) == testStr, fmt.Sprintf("server got %q; wanted %q", b[:n], testStr))
 
 		u.Must(hv.CloseRead(), "server close read")
@@ -338,14 +340,16 @@ func TestHvSockCloseReadWriteListener(t *testing.T) {
 	b := make([]byte, 256)
 	n, err := cl.Read(b)
 	u.Must(err, "client read")
+	u.Assert(n == len(testStr), fmt.Sprintf("client read %d bytes, wanted %d", n, len(testStr)))
 	u.Assert(string(b[:n]) == testStr, fmt.Sprintf("client got %q; wanted %q", b[:n], testStr))
 
 	n, err = cl.Read(b)
 	u.Assert(n == 0, "client did not get EOF")
 	u.Is(err, io.EOF, "client did not get EOF")
 
-	_, err = cl.Write([]byte(testStr))
+	n, err = cl.Write([]byte(testStr))
 	u.Must(err, "client write")
+	u.Assert(n == len(testStr), fmt.Sprintf("client wrote %d bytes, wanted %d", n, len(testStr)))
 
 	u.Wait(ch, time.Second)
 	u.Check()
@@ -592,7 +596,7 @@ func (u testUtil) Assert(b bool, msgs ...string) {
 		return
 	}
 	u.T.Helper()
-	u.T.Fatalf(_msgJoin(msgs, "failed assertion"))
+	u.T.Fatalf(msgJoin(msgs, "failed assertion"))
 }
 
 func (u testUtil) Is(err, target error, msgs ...string) {
@@ -600,7 +604,7 @@ func (u testUtil) Is(err, target error, msgs ...string) {
 		return
 	}
 	u.T.Helper()
-	u.T.Fatalf(_msgJoin(msgs, "got error %q; wanted %q"), err, target)
+	u.T.Fatalf(msgJoin(msgs, "got error %q; wanted %q"), err, target)
 }
 
 func (u testUtil) Must(err error, msgs ...string) {
@@ -608,7 +612,7 @@ func (u testUtil) Must(err error, msgs ...string) {
 		return
 	}
 	u.T.Helper()
-	u.T.Fatalf(_msgJoin(msgs, "%v"), err)
+	u.T.Fatalf(msgJoin(msgs, "%v"), err)
 }
 
 func (u testUtil) Wait(ch <-chan struct{}, d time.Duration, msgs ...string) {
@@ -618,10 +622,10 @@ func (u testUtil) Wait(ch <-chan struct{}, d time.Duration, msgs ...string) {
 	case <-ch:
 	case <-t.C:
 		u.T.Helper()
-		u.T.Fatalf(_msgJoin(msgs, "timed out after %v"), d)
+		u.T.Fatalf(msgJoin(msgs, "timed out after %v"), d)
 	}
 }
 
-func _msgJoin(pre []string, s string) string {
+func msgJoin(pre []string, s string) string {
 	return strings.Join(append(pre, s), ": ")
 }

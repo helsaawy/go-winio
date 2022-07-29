@@ -8,13 +8,13 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	"strings"
 	"testing"
 	"time"
 
 	"golang.org/x/sys/windows"
 
 	"github.com/Microsoft/go-winio/internal/socket"
+	"github.com/Microsoft/go-winio/internal/testutil"
 	"github.com/Microsoft/go-winio/pkg/guid"
 )
 
@@ -30,7 +30,7 @@ func randHvsockAddr() *HvsockAddr {
 	}
 }
 
-func serverListen(u testUtil) (*HvsockListener, *HvsockAddr) {
+func serverListen(u *testutil.U) (*HvsockListener, *HvsockAddr) {
 	a := randHvsockAddr()
 	l, err := ListenHvsock(a)
 	u.Must(err, "could not listen")
@@ -43,7 +43,7 @@ func serverListen(u testUtil) (*HvsockListener, *HvsockAddr) {
 	return l, a
 }
 
-func clientServer(u testUtil) (cl, sv *HvsockConn, _ *HvsockAddr) {
+func clientServer(u *testutil.U) (cl, sv *HvsockConn, _ *HvsockAddr) {
 	l, addr := serverListen(u)
 	ch := make(chan struct{})
 	go func() {
@@ -98,7 +98,7 @@ func TestHvSockConstants(t *testing.T) {
 }
 
 func TestHvSockListenerAddresses(t *testing.T) {
-	u := newUtil(t)
+	u := testutil.New(t)
 	l, addr := serverListen(u)
 
 	la := (l.Addr()).(*HvsockAddr)
@@ -112,7 +112,7 @@ func TestHvSockListenerAddresses(t *testing.T) {
 }
 
 func TestHvSockAddresses(t *testing.T) {
-	u := newUtil(t)
+	u := testutil.New(t)
 	cl, sv, addr := clientServer(u)
 
 	sra := (sv.RemoteAddr()).(*HvsockAddr)
@@ -139,7 +139,7 @@ func TestHvSockAddresses(t *testing.T) {
 	})
 
 	t.Run("OSinfo", func(t *testing.T) {
-		u := newUtil(t)
+		u := testutil.New(t)
 		ra := rawHvsockAddr{}
 		sa := HvsockAddr{}
 
@@ -179,7 +179,7 @@ func TestHvSockAddresses(t *testing.T) {
 }
 
 func TestHvSockReadWrite(t *testing.T) {
-	u := newUtil(t)
+	u := testutil.New(t)
 	l, addr := serverListen(u)
 	tests := []struct {
 		req, rsp string
@@ -240,7 +240,7 @@ func TestHvSockReadWrite(t *testing.T) {
 }
 
 func TestHvSockReadTooSmall(t *testing.T) {
-	u := newUtil(t)
+	u := testutil.New(t)
 	s := "this is a really long string that hopefully takes up more than 16 bytes ..."
 	l, addr := serverListen(u)
 
@@ -281,7 +281,7 @@ func TestHvSockReadTooSmall(t *testing.T) {
 }
 
 func TestHvSockCloseReadWriteListener(t *testing.T) {
-	u := newUtil(t)
+	u := testutil.New(t)
 	l, addr := serverListen(u)
 
 	ch := make(chan struct{})
@@ -360,7 +360,7 @@ func TestHvSockCloseReadWriteListener(t *testing.T) {
 }
 
 func TestHvSockCloseReadWriteDial(t *testing.T) {
-	u := newUtil(t)
+	u := testutil.New(t)
 	l, addr := serverListen(u)
 
 	ch := make(chan struct{})
@@ -436,7 +436,7 @@ func TestHvSockCloseReadWriteDial(t *testing.T) {
 }
 
 func TestHvSockDialNoTimeout(t *testing.T) {
-	u := newUtil(t)
+	u := testutil.New(t)
 	ch := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -457,7 +457,7 @@ func TestHvSockDialNoTimeout(t *testing.T) {
 }
 
 func TestHvSockDialDeadline(t *testing.T) {
-	u := newUtil(t)
+	u := testutil.New(t)
 	d := &HvsockDialer{}
 	d.Deadline = time.Now().Add(50 * time.Microsecond)
 	d.Retries = 1
@@ -474,7 +474,7 @@ func TestHvSockDialDeadline(t *testing.T) {
 }
 
 func TestHvSockDialContext(t *testing.T) {
-	u := newUtil(t)
+	u := testutil.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(50*time.Microsecond, cancel)
 
@@ -491,7 +491,7 @@ func TestHvSockDialContext(t *testing.T) {
 }
 
 func TestHvSockAcceptClose(t *testing.T) {
-	u := newUtil(t)
+	u := testutil.New(t)
 	l, _ := serverListen(u)
 	go func() {
 		time.Sleep(50 * time.Millisecond)
@@ -527,7 +527,7 @@ func FuzzRxTx(f *testing.F) {
 			t.Skip("skipping empty string")
 		}
 		t.Logf("testing %q (%d)", a, len(a))
-		u := newUtil(t)
+		u := testutil.New(t)
 		cl, sv, _ := clientServer(u)
 
 		svCh := make(chan struct{})
@@ -568,64 +568,4 @@ func FuzzRxTx(f *testing.F) {
 		u.Wait(svCh, 250*time.Millisecond)
 		u.Wait(clCh, 250*time.Millisecond)
 	})
-}
-
-//
-// helpers
-//
-
-type testUtil struct {
-	T testing.TB
-}
-
-func newUtil(t testing.TB) testUtil {
-	return testUtil{
-		T: t,
-	}
-}
-
-// checks stops execution if testing failed in another go-routine
-func (u testUtil) Check() {
-	if u.T.Failed() {
-		u.T.FailNow()
-	}
-}
-
-func (u testUtil) Assert(b bool, msgs ...string) {
-	if b {
-		return
-	}
-	u.T.Helper()
-	u.T.Fatalf(msgJoin(msgs, "failed assertion"))
-}
-
-func (u testUtil) Is(err, target error, msgs ...string) {
-	if errors.Is(err, target) {
-		return
-	}
-	u.T.Helper()
-	u.T.Fatalf(msgJoin(msgs, "got error %q; wanted %q"), err, target)
-}
-
-func (u testUtil) Must(err error, msgs ...string) {
-	if err == nil {
-		return
-	}
-	u.T.Helper()
-	u.T.Fatalf(msgJoin(msgs, "%v"), err)
-}
-
-func (u testUtil) Wait(ch <-chan struct{}, d time.Duration, msgs ...string) {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ch:
-	case <-t.C:
-		u.T.Helper()
-		u.T.Fatalf(msgJoin(msgs, "timed out after %v"), d)
-	}
-}
-
-func msgJoin(pre []string, s string) string {
-	return strings.Join(append(pre, s), ": ")
 }

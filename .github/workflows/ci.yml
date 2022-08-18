@@ -27,7 +27,7 @@ jobs:
             --modules-download-mode=readonly
 
   go-generate:
-    name: Verify Generated Files are Current
+    name: Validate Generated Files
     runs-on: windows-2019
     steps:
       - uses: actions/checkout@v3
@@ -44,6 +44,7 @@ jobs:
             Write-Output "::error title=Go Generate::Error running go generate."
             exit $LASTEXITCODE
           }
+
       - name: Diff
         shell: pwsh
         run: |

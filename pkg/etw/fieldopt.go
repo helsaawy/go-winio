@@ -56,6 +56,14 @@ func StringField(name string, value string) FieldOpt {
 	}
 }
 
+// StringField adds a JSON-encoded value field to the event.
+func JSONStringField(name string, value string) FieldOpt {
+	return func(em *eventMetadata, ed *eventData) {
+		em.writeField(name, inTypeANSIString, outTypeJSON, 0)
+		ed.writeString(value)
+	}
+}
+
 // StringArray adds an array of string to the event.
 func StringArray(name string, values []string) FieldOpt {
 	return func(em *eventMetadata, ed *eventData) {

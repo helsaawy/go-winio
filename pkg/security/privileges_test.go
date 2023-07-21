@@ -1,7 +1,6 @@
 //go:build windows
-// +build windows
 
-package winio
+package security
 
 import (
 	"errors"

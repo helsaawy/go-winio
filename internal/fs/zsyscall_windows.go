@@ -41,9 +41,23 @@ func errnoErr(e syscall.Errno) error {
 
 var (
 	modkernel32 = windows.NewLazySystemDLL("kernel32.dll")
+	modws2_32   = windows.NewLazySystemDLL("ws2_32.dll")
 
-	procCreateFileW = modkernel32.NewProc("CreateFileW")
+	procCancelIoEx                         = modkernel32.NewProc("CancelIoEx")
+	procCreateFileW                        = modkernel32.NewProc("CreateFileW")
+	procCreateIoCompletionPort             = modkernel32.NewProc("CreateIoCompletionPort")
+	procGetQueuedCompletionStatus          = modkernel32.NewProc("GetQueuedCompletionStatus")
+	procSetFileCompletionNotificationModes = modkernel32.NewProc("SetFileCompletionNotificationModes")
+	procWSAGetOverlappedResult             = modws2_32.NewProc("WSAGetOverlappedResult")
 )
+
+func cancelIoEx(file windows.Handle, o *windows.Overlapped) (err error) {
+	r1, _, e1 := syscall.Syscall(procCancelIoEx.Addr(), 2, uintptr(file), uintptr(unsafe.Pointer(o)), 0)
+	if r1 == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
 
 func CreateFile(name string, access AccessMask, mode FileShareMode, sa *syscall.SecurityAttributes, createmode FileCreationDisposition, attrs FileFlagOrAttribute, templatefile windows.Handle) (handle windows.Handle, err error) {
 	var _p0 *uint16
@@ -58,6 +72,43 @@ func _CreateFile(name *uint16, access AccessMask, mode FileShareMode, sa *syscal
 	r0, _, e1 := syscall.Syscall9(procCreateFileW.Addr(), 7, uintptr(unsafe.Pointer(name)), uintptr(access), uintptr(mode), uintptr(unsafe.Pointer(sa)), uintptr(createmode), uintptr(attrs), uintptr(templatefile), 0, 0)
 	handle = windows.Handle(r0)
 	if handle == windows.InvalidHandle {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func createIoCompletionPort(file windows.Handle, port windows.Handle, key uintptr, threadCount uint32) (newport windows.Handle, err error) {
+	r0, _, e1 := syscall.Syscall6(procCreateIoCompletionPort.Addr(), 4, uintptr(file), uintptr(port), uintptr(key), uintptr(threadCount), 0, 0)
+	newport = windows.Handle(r0)
+	if newport == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func getQueuedCompletionStatus(port windows.Handle, bytes *uint32, key *uintptr, o **IOOperation, timeout uint32) (err error) {
+	r1, _, e1 := syscall.Syscall6(procGetQueuedCompletionStatus.Addr(), 5, uintptr(port), uintptr(unsafe.Pointer(bytes)), uintptr(unsafe.Pointer(key)), uintptr(unsafe.Pointer(o)), uintptr(timeout), 0)
+	if r1 == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func setFileCompletionNotificationModes(h windows.Handle, flags uint8) (err error) {
+	r1, _, e1 := syscall.Syscall(procSetFileCompletionNotificationModes.Addr(), 2, uintptr(h), uintptr(flags), 0)
+	if r1 == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func wsaGetOverlappedResult(h windows.Handle, o *windows.Overlapped, bytes *uint32, wait bool, flags *uint32) (err error) {
+	var _p0 uint32
+	if wait {
+		_p0 = 1
+	}
+	r1, _, e1 := syscall.Syscall6(procWSAGetOverlappedResult.Addr(), 5, uintptr(h), uintptr(unsafe.Pointer(o)), uintptr(unsafe.Pointer(bytes)), uintptr(_p0), uintptr(unsafe.Pointer(flags)), 0)
+	if r1 == 0 {
 		err = errnoErr(e1)
 	}
 	return

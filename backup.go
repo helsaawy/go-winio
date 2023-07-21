@@ -13,12 +13,17 @@ import (
 	"syscall"
 	"unicode/utf16"
 
+	"github.com/Microsoft/go-winio/pkg/fs/backup"
 	"golang.org/x/sys/windows"
 )
+
+// can't redirect to github.com/Microsoft/go-winio/pkg/fs/backup since BackupHeader has `Id` instead of `ID`,
+// and type is of uint32 instead of backup.StreamID
 
 //sys backupRead(h syscall.Handle, b []byte, bytesRead *uint32, abort bool, processSecurity bool, context *uintptr) (err error) = BackupRead
 //sys backupWrite(h syscall.Handle, b []byte, bytesWritten *uint32, abort bool, processSecurity bool, context *uintptr) (err error) = BackupWrite
 
+// Deprecated: use constants defined in github.com/Microsoft/go-winio/pkg/fs/backup instead.
 const (
 	BackupData = uint32(iota + 1)
 	BackupEaData
@@ -33,9 +38,12 @@ const (
 )
 
 const (
+	// Deprecated: use github.com/Microsoft/go-winio/pkg/fs/backup.StreamSparseAttributes instead.
 	StreamSparseAttributes = uint32(8)
 )
 
+// Deprecated: use constants defined in golang.org/x/sys/windows
+//
 //nolint:revive // var-naming: ALL_CAPS
 const (
 	WRITE_DAC              = windows.WRITE_DAC
@@ -44,6 +52,8 @@ const (
 )
 
 // BackupHeader represents a backup stream of a file.
+//
+// Deprecated: use github.com/Microsoft/go-winio/pkg/fs/backup.Header instead.
 type BackupHeader struct {
 	//revive:disable-next-line:var-naming ID, not Id
 	Id         uint32 // The backup stream ID
@@ -62,12 +72,16 @@ type win32StreamID struct {
 
 // BackupStreamReader reads from a stream produced by the BackupRead Win32 API and produces a series
 // of BackupHeader values.
+//
+// Deprecated: use github.com/Microsoft/go-winio/pkg/fs/backup.StreamReader instead.
 type BackupStreamReader struct {
 	r         io.Reader
 	bytesLeft int64
 }
 
 // NewBackupStreamReader produces a BackupStreamReader from any io.Reader.
+//
+// Deprecated: use github.com/Microsoft/go-winio/pkg/fs/backup.NewStreamReader instead.
 func NewBackupStreamReader(r io.Reader) *BackupStreamReader {
 	return &BackupStreamReader{r, 0}
 }
@@ -135,12 +149,16 @@ func (r *BackupStreamReader) Read(b []byte) (int, error) {
 }
 
 // BackupStreamWriter writes a stream compatible with the BackupWrite Win32 API.
+//
+// Deprecated: use github.com/Microsoft/go-winio/pkg/fs/backup.StreamWriter instead.
 type BackupStreamWriter struct {
 	w         io.Writer
 	bytesLeft int64
 }
 
 // NewBackupStreamWriter produces a BackupStreamWriter on top of an io.Writer.
+//
+// Deprecated: use github.com/Microsoft/go-winio/pkg/fs/backup.NewStreamWriter instead.
 func NewBackupStreamWriter(w io.Writer) *BackupStreamWriter {
 	return &BackupStreamWriter{w, 0}
 }
@@ -189,6 +207,8 @@ func (w *BackupStreamWriter) Write(b []byte) (int, error) {
 }
 
 // BackupFileReader provides an io.ReadCloser interface on top of the BackupRead Win32 API.
+//
+// Deprecated: use github.com/Microsoft/go-winio/pkg/fs/backup.FileReader instead.
 type BackupFileReader struct {
 	f               *os.File
 	includeSecurity bool
@@ -197,6 +217,8 @@ type BackupFileReader struct {
 
 // NewBackupFileReader returns a new BackupFileReader from a file handle. If includeSecurity is true,
 // Read will attempt to read the security descriptor of the file.
+//
+// Deprecated: use github.com/Microsoft/go-winio/pkg/fs/backup.NewFileReader instead.
 func NewBackupFileReader(f *os.File, includeSecurity bool) *BackupFileReader {
 	r := &BackupFileReader{f, includeSecurity, 0}
 	return r
@@ -228,6 +250,8 @@ func (r *BackupFileReader) Close() error {
 }
 
 // BackupFileWriter provides an io.WriteCloser interface on top of the BackupWrite Win32 API.
+//
+// Deprecated: use github.com/Microsoft/go-winio/pkg/fs/backup.FileWriter instead.
 type BackupFileWriter struct {
 	f               *os.File
 	includeSecurity bool
@@ -236,6 +260,8 @@ type BackupFileWriter struct {
 
 // NewBackupFileWriter returns a new BackupFileWriter from a file handle. If includeSecurity is true,
 // Write() will attempt to restore the security descriptor from the stream.
+//
+// Deprecated: use github.com/Microsoft/go-winio/pkg/fs/backup.NewFileWriter instead.
 func NewBackupFileWriter(f *os.File, includeSecurity bool) *BackupFileWriter {
 	w := &BackupFileWriter{f, includeSecurity, 0}
 	return w
@@ -270,21 +296,8 @@ func (w *BackupFileWriter) Close() error {
 // or restore privileges have been acquired.
 //
 // If the file opened was a directory, it cannot be used with Readdir().
+//
+// Deprecated: use github.com/Microsoft/go-winio/pkg/fs/backup.Open instead.
 func OpenForBackup(path string, access uint32, share uint32, createmode uint32) (*os.File, error) {
-	winPath, err := syscall.UTF16FromString(path)
-	if err != nil {
-		return nil, err
-	}
-	h, err := syscall.CreateFile(&winPath[0],
-		access,
-		share,
-		nil,
-		createmode,
-		syscall.FILE_FLAG_BACKUP_SEMANTICS|syscall.FILE_FLAG_OPEN_REPARSE_POINT,
-		0)
-	if err != nil {
-		err = &os.PathError{Op: "open", Path: path, Err: err}
-		return nil, err
-	}
-	return os.NewFile(uintptr(h), path), nil
+	return backup.OpenForBackup(path, access, share, createmode)
 }

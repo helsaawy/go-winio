@@ -1,12 +1,10 @@
 //go:build windows
-// +build windows
 
-package winio
+package backup
 
 import (
 	"io"
 	"os"
-	"syscall"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -61,7 +59,7 @@ func TestBackupRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	r := NewBackupFileReader(f, false)
+	r := NewFileReader(f, false)
 	defer r.Close()
 	b, err := io.ReadAll(r)
 	if err != nil {
@@ -83,10 +81,10 @@ func TestBackupStreamRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	r := NewBackupFileReader(f, false)
+	r := NewFileReader(f, false)
 	defer r.Close()
 
-	br := NewBackupStreamReader(r)
+	br := NewStreamReader(r)
 	gotData := false
 	gotAltData := false
 	for {
@@ -98,7 +96,7 @@ func TestBackupStreamRead(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		switch hdr.Id {
+		switch hdr.ID {
 		case BackupData:
 			if gotData {
 				t.Fatal("duplicate data")
@@ -130,7 +128,7 @@ func TestBackupStreamRead(t *testing.T) {
 			}
 			gotAltData = true
 		default:
-			t.Fatalf("unknown stream ID %d", hdr.Id)
+			t.Fatalf("unknown stream ID %d", hdr.ID)
 		}
 	}
 	if !gotData || !gotAltData {
@@ -144,14 +142,14 @@ func TestBackupStreamWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	w := NewBackupFileWriter(f, false)
+	w := NewFileWriter(f, false)
 	defer w.Close()
 
 	data := "testing 1 2 3\n"
 	altData := "alternate stream\n"
 
-	br := NewBackupStreamWriter(w)
-	err = br.WriteHeader(&BackupHeader{Id: BackupData, Size: int64(len(data))})
+	br := NewStreamWriter(w)
+	err = br.WriteHeader(&Header{ID: BackupData, Size: int64(len(data))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +161,7 @@ func TestBackupStreamWrite(t *testing.T) {
 		t.Fatal("short write")
 	}
 
-	err = br.WriteHeader(&BackupHeader{Id: BackupAlternateData, Size: int64(len(altData)), Name: ":ads.txt:$DATA"})
+	err = br.WriteHeader(&Header{ID: BackupAlternateData, Size: int64(len(altData)), Name: ":ads.txt:$DATA"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +200,7 @@ func makeSparseFile() error {
 	}
 	defer f.Close()
 
-	err = syscall.DeviceIoControl(syscall.Handle(f.Fd()), windows.FSCTL_SET_SPARSE, nil, 0, nil, 0, nil, nil)
+	err = windows.DeviceIoControl(windows.Handle(f.Fd()), windows.FSCTL_SET_SPARSE, nil, 0, nil, 0, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -236,10 +234,10 @@ func TestBackupSparseFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	r := NewBackupFileReader(f, false)
+	r := NewFileReader(f, false)
 	defer r.Close()
 
-	br := NewBackupStreamReader(r)
+	br := NewStreamReader(r)
 	for {
 		hdr, err := br.Next()
 		if err == io.EOF { //nolint:errorlint

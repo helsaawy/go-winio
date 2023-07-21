@@ -1,5 +1,4 @@
 //go:build windows
-// +build windows
 
 package winio
 
@@ -11,7 +10,6 @@ import (
 	"io"
 	"net"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 	"unsafe"
@@ -25,7 +23,7 @@ var aLongTimeAgo = time.Unix(1, 0)
 
 func TestDialUnknownFailsImmediately(t *testing.T) {
 	_, err := DialPipe(testPipeName, nil)
-	if !errors.Is(err, syscall.ENOENT) {
+	if !errors.Is(err, windows.ERROR_FILE_NOT_FOUND) {
 		t.Fatalf("expected ENOENT got %v", err)
 	}
 }
@@ -88,7 +86,7 @@ func TestDialAccessDeniedWithRestrictedSD(t *testing.T) {
 	}
 	defer l.Close()
 	_, err = DialPipe(testPipeName, nil)
-	if !errors.Is(err, syscall.ERROR_ACCESS_DENIED) {
+	if !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
 		t.Fatalf("expected ERROR_ACCESS_DENIED, got %v", err)
 	}
 }
@@ -536,11 +534,11 @@ func TestMessageReadMode(t *testing.T) {
 	}
 	defer c.Close()
 
-	setNamedPipeHandleState := syscall.NewLazyDLL("kernel32.dll").NewProc("SetNamedPipeHandleState")
+	setNamedPipeHandleState := windows.NewLazyDLL("kernel32.dll").NewProc("SetNamedPipeHandleState")
 
 	p := c.(*win32MessageBytePipe)
 	mode := uint32(windows.PIPE_READMODE_MESSAGE)
-	if s, _, err := setNamedPipeHandleState.Call(uintptr(p.handle), uintptr(unsafe.Pointer(&mode)), 0, 0); s == 0 {
+	if s, _, err := setNamedPipeHandleState.Call(uintptr(p.Handle), uintptr(unsafe.Pointer(&mode)), 0, 0); s == 0 {
 		t.Fatal(err)
 	}
 

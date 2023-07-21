@@ -1,50 +1,41 @@
 //go:build windows
-// +build windows
 
 package security
 
 import (
 	"fmt"
 	"os"
-	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
+
+	"github.com/Microsoft/go-winio/internal/fs"
 )
 
 type (
-	accessMask          uint32
-	accessMode          uint32
-	desiredAccess       uint32
 	inheritMode         uint32
 	objectType          uint32
-	shareMode           uint32
 	securityInformation uint32
 	trusteeForm         uint32
 	trusteeType         uint32
-
-	explicitAccess struct {
-		accessPermissions accessMask
-		accessMode        accessMode
-		inheritance       inheritMode
-		trustee           trustee
-	}
-
-	trustee struct {
-		multipleTrustee          *trustee
-		multipleTrusteeOperation int32
-		trusteeForm              trusteeForm
-		trusteeType              trusteeType
-		name                     uintptr
-	}
 )
 
+type explicitAccess struct {
+	accessPermissions fs.AccessMask
+	accessMode        fs.AccessMask
+	inheritance       inheritMode
+	trustee           trustee
+}
+
+type trustee struct {
+	multipleTrustee          *trustee
+	multipleTrusteeOperation int32
+	trusteeForm              trusteeForm
+	trusteeType              trusteeType
+	name                     uintptr
+}
+
 const (
-	accessMaskDesiredPermission accessMask = 1 << 31 // GENERIC_READ
-
-	accessModeGrant accessMode = 1
-
-	desiredAccessReadControl desiredAccess = 0x20000
-	desiredAccessWriteDac    desiredAccess = 0x40000
-
 	//cspell:disable-next-line
 	gvmga = "GrantVmGroupAccess:"
 
@@ -54,9 +45,6 @@ const (
 	objectTypeFileObject objectType = 0x1
 
 	securityInformationDACL securityInformation = 0x4
-
-	shareModeRead  shareMode = 0x1
-	shareModeWrite shareMode = 0x2
 
 	sidVMGroup = "S-1-5-83-0"
 
@@ -83,7 +71,7 @@ func GrantVmGroupAccess(name string) error {
 	if err != nil {
 		return err // Already wrapped
 	}
-	defer syscall.CloseHandle(fd) //nolint:errcheck
+	defer windows.CloseHandle(fd) //nolint:errcheck
 
 	// Get the current DACL and Security Descriptor. Must defer LocalFree on success.
 	ot := objectTypeFileObject
@@ -93,7 +81,7 @@ func GrantVmGroupAccess(name string) error {
 	if err := getSecurityInfo(fd, uint32(ot), uint32(si), nil, nil, &origDACL, nil, &sd); err != nil {
 		return fmt.Errorf("%s GetSecurityInfo %s: %w", gvmga, name, err)
 	}
-	defer syscall.LocalFree((syscall.Handle)(unsafe.Pointer(sd))) //nolint:errcheck
+	defer windows.LocalFree((windows.Handle)(unsafe.Pointer(sd))) //nolint:errcheck
 
 	// Generate a new DACL which is the current DACL with the required ACEs added.
 	// Must defer LocalFree on success.
@@ -101,7 +89,7 @@ func GrantVmGroupAccess(name string) error {
 	if err != nil {
 		return err // Already wrapped
 	}
-	defer syscall.LocalFree((syscall.Handle)(unsafe.Pointer(newDACL))) //nolint:errcheck
+	defer windows.LocalFree((windows.Handle)(unsafe.Pointer(newDACL))) //nolint:errcheck
 
 	// And finally use SetSecurityInfo to apply the updated DACL.
 	if err := setSecurityInfo(fd, uint32(ot), uint32(si), uintptr(0), uintptr(0), newDACL, uintptr(0)); err != nil {
@@ -113,20 +101,19 @@ func GrantVmGroupAccess(name string) error {
 
 // createFile is a helper function to call [Nt]CreateFile to get a handle to
 // the file or directory.
-func createFile(name string, isDir bool) (syscall.Handle, error) {
-	namep, err := syscall.UTF16FromString(name)
-	if err != nil {
-		return syscall.InvalidHandle, fmt.Errorf("could not convernt name to UTF-16: %w", err)
-	}
-	da := uint32(desiredAccessReadControl | desiredAccessWriteDac)
-	sm := uint32(shareModeRead | shareModeWrite)
-	fa := uint32(syscall.FILE_ATTRIBUTE_NORMAL)
+func createFile(name string, isDir bool) (windows.Handle, error) {
+	fa := fs.FILE_ATTRIBUTE_NORMAL
 	if isDir {
-		fa |= syscall.FILE_FLAG_BACKUP_SEMANTICS
+		fa |= fs.FILE_FLAG_BACKUP_SEMANTICS
 	}
-	fd, err := syscall.CreateFile(&namep[0], da, sm, nil, syscall.OPEN_EXISTING, fa, 0)
+	fd, err := fs.CreateFile(name,
+		fs.READ_CONTROL|fs.WRITE_DAC,
+		fs.FILE_SHARE_READ|fs.FILE_SHARE_WRITE,
+		nil, fs.OPEN_EXISTING,
+		fa,
+		0)
 	if err != nil {
-		return syscall.InvalidHandle, fmt.Errorf("%s syscall.CreateFile %s: %w", gvmga, name, err)
+		return windows.InvalidHandle, fmt.Errorf("%s windows.CreateFile %s: %w", gvmga, name, err)
 	}
 	return fd, nil
 }
@@ -135,20 +122,22 @@ func createFile(name string, isDir bool) (syscall.Handle, error) {
 // The caller is responsible for LocalFree of the returned DACL on success.
 func generateDACLWithAcesAdded(name string, isDir bool, origDACL uintptr) (uintptr, error) {
 	// Generate pointers to the SIDs based on the string SIDs
-	sid, err := syscall.StringToSid(sidVMGroup)
+	sid, err := windows.StringToSid(sidVMGroup)
 	if err != nil {
-		return 0, fmt.Errorf("%s syscall.StringToSid %s %s: %w", gvmga, name, sidVMGroup, err)
+		return 0, fmt.Errorf("%s windows.StringToSid %s %s: %w", gvmga, name, sidVMGroup, err)
 	}
 
+	am := fs.FILE_READ_DATA
 	inheritance := inheritModeNoInheritance
 	if isDir {
 		inheritance = inheritModeSubContainersAndObjectsInherit
+		am = fs.FILE_LIST_DIRECTORY
 	}
 
 	eaArray := []explicitAccess{
 		{
-			accessPermissions: accessMaskDesiredPermission,
-			accessMode:        accessModeGrant,
+			accessPermissions: fs.GENERIC_READ,
+			accessMode:        am,
 			inheritance:       inheritance,
 			trustee: trustee{
 				trusteeForm: trusteeFormIsSID,

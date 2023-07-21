@@ -1,5 +1,4 @@
 //go:build windows
-// +build windows
 
 package backuptar
 
@@ -14,8 +13,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
+
+	"github.com/Microsoft/go-winio/pkg/fs"
+	"github.com/Microsoft/go-winio/pkg/fs/backup"
+	"github.com/Microsoft/go-winio/pkg/fs/reparse"
+	"github.com/Microsoft/go-winio/pkg/security"
 )
 
 //nolint:deadcode,varcheck // keep unused constants for potential future use
@@ -52,7 +55,7 @@ func (zeroReader) Read(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func copySparse(t *tar.Writer, br *winio.BackupStreamReader) error {
+func copySparse(t *tar.Writer, br *backup.StreamReader) error {
 	curOffset := int64(0)
 	for {
 		bhdr, err := br.Next()
@@ -62,8 +65,8 @@ func copySparse(t *tar.Writer, br *winio.BackupStreamReader) error {
 		if err != nil {
 			return err
 		}
-		if bhdr.Id != winio.BackupSparseBlock {
-			return fmt.Errorf("unexpected stream %d", bhdr.Id)
+		if bhdr.ID != backup.BackupSparseBlock {
+			return fmt.Errorf("unexpected stream %d", bhdr.ID)
 		}
 
 		// We can't seek backwards, since we have already written that data to the tar.Writer.
@@ -92,7 +95,7 @@ func copySparse(t *tar.Writer, br *winio.BackupStreamReader) error {
 }
 
 // BasicInfoHeader creates a tar header from basic file information.
-func BasicInfoHeader(name string, size int64, fileInfo *winio.FileBasicInfo) *tar.Header {
+func BasicInfoHeader(name string, size int64, fileInfo *fs.FileBasicInfo) *tar.Header {
 	hdr := &tar.Header{
 		Format:     tar.FormatPAX,
 		Name:       filepath.ToSlash(name),
@@ -131,7 +134,7 @@ func SecurityDescriptorFromTarHeader(hdr *tar.Header) ([]byte, error) {
 	// tar headers written by this library will have raw binary for the security
 	// descriptor.
 	if sddl, ok := hdr.PAXRecords[hdrSecurityDescriptor]; ok {
-		return winio.SddlToSecurityDescriptor(sddl)
+		return security.SDDLToSecurityDescriptor(sddl)
 	}
 	return nil, nil
 }
@@ -139,7 +142,7 @@ func SecurityDescriptorFromTarHeader(hdr *tar.Header) ([]byte, error) {
 // ExtendedAttributesFromTarHeader reads the EAs associated with the header of the
 // current file from the tar header and returns it as a byte slice.
 func ExtendedAttributesFromTarHeader(hdr *tar.Header) ([]byte, error) {
-	var eas []winio.ExtendedAttribute //nolint:prealloc // len(eas) <= len(hdr.PAXRecords); prealloc is wasteful
+	var eas []fs.ExtendedAttribute //nolint:prealloc // len(eas) <= len(hdr.PAXRecords); prealloc is wasteful
 	for k, v := range hdr.PAXRecords {
 		if !strings.HasPrefix(k, hdrEaPrefix) {
 			continue
@@ -148,7 +151,7 @@ func ExtendedAttributesFromTarHeader(hdr *tar.Header) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		eas = append(eas, winio.ExtendedAttribute{
+		eas = append(eas, fs.ExtendedAttribute{
 			Name:  k[len(hdrEaPrefix):],
 			Value: data,
 		})
@@ -156,7 +159,7 @@ func ExtendedAttributesFromTarHeader(hdr *tar.Header) ([]byte, error) {
 	var eaData []byte
 	var err error
 	if len(eas) != 0 {
-		eaData, err = winio.EncodeExtendedAttributes(eas)
+		eaData, err = fs.EncodeExtendedAttributes(eas)
 		if err != nil {
 			return nil, err
 		}
@@ -169,11 +172,11 @@ func ExtendedAttributesFromTarHeader(hdr *tar.Header) ([]byte, error) {
 // symlink.
 func EncodeReparsePointFromTarHeader(hdr *tar.Header) []byte {
 	_, isMountPoint := hdr.PAXRecords[hdrMountPoint]
-	rp := winio.ReparsePoint{
+	rp := reparse.ReparsePoint{
 		Target:       filepath.FromSlash(hdr.Linkname),
 		IsMountPoint: isMountPoint,
 	}
-	return winio.EncodeReparsePoint(&rp)
+	return reparse.Encode(&rp)
 }
 
 // WriteTarFileFromBackupStream writes a file to a tar writer using data from a Win32 backup stream.
@@ -185,7 +188,7 @@ func EncodeReparsePointFromTarHeader(hdr *tar.Header) []byte {
 //   - MSWINDOWS.fileattr: The Win32 file attributes, as a decimal value
 //   - MSWINDOWS.rawsd: The Win32 security descriptor, in raw binary format
 //   - MSWINDOWS.mountpoint: If present, this is a mount point and not a symlink, even though the type is '2' (symlink)
-func WriteTarFileFromBackupStream(t *tar.Writer, r io.Reader, name string, size int64, fileInfo *winio.FileBasicInfo) error {
+func WriteTarFileFromBackupStream(t *tar.Writer, r io.Reader, name string, size int64, fileInfo *fs.FileBasicInfo) error {
 	name = filepath.ToSlash(name)
 	hdr := BasicInfoHeader(name, size, fileInfo)
 
@@ -203,8 +206,8 @@ func WriteTarFileFromBackupStream(t *tar.Writer, r io.Reader, name string, size 
 		}
 	}
 
-	br := winio.NewBackupStreamReader(r)
-	var dataHdr *winio.BackupHeader
+	br := backup.NewStreamReader(r)
+	var dataHdr *backup.Header
 	for dataHdr == nil {
 		bhdr, err := br.Next()
 		if err == io.EOF { //nolint:errorlint
@@ -213,24 +216,24 @@ func WriteTarFileFromBackupStream(t *tar.Writer, r io.Reader, name string, size 
 		if err != nil {
 			return err
 		}
-		switch bhdr.Id {
-		case winio.BackupData:
+		switch bhdr.ID {
+		case backup.BackupData:
 			hdr.Mode |= cISREG
 			if !readTwice {
 				dataHdr = bhdr
 			}
-		case winio.BackupSecurity:
+		case backup.BackupSecurity:
 			sd, err := io.ReadAll(br)
 			if err != nil {
 				return err
 			}
 			hdr.PAXRecords[hdrRawSecurityDescriptor] = base64.StdEncoding.EncodeToString(sd)
 
-		case winio.BackupReparseData:
+		case backup.BackupReparseData:
 			hdr.Mode |= cISLNK
 			hdr.Typeflag = tar.TypeSymlink
 			reparseBuffer, _ := io.ReadAll(br)
-			rp, err := winio.DecodeReparsePoint(reparseBuffer)
+			rp, err := reparse.Decode(reparseBuffer)
 			if err != nil {
 				return err
 			}
@@ -239,12 +242,12 @@ func WriteTarFileFromBackupStream(t *tar.Writer, r io.Reader, name string, size 
 			}
 			hdr.Linkname = rp.Target
 
-		case winio.BackupEaData:
+		case backup.BackupEAData:
 			eab, err := io.ReadAll(br)
 			if err != nil {
 				return err
 			}
-			eas, err := winio.DecodeExtendedAttributes(eab)
+			eas, err := fs.DecodeExtendedAttributes(eab)
 			if err != nil {
 				return err
 			}
@@ -255,10 +258,10 @@ func WriteTarFileFromBackupStream(t *tar.Writer, r io.Reader, name string, size 
 				hdr.PAXRecords[hdrEaPrefix+ea.Name] = base64.StdEncoding.EncodeToString(ea.Value)
 			}
 
-		case winio.BackupAlternateData, winio.BackupLink, winio.BackupPropertyData, winio.BackupObjectId, winio.BackupTxfsData:
+		case backup.BackupAlternateData, backup.BackupLink, backup.BackupPropertyData, backup.BackupObjectID, backup.BackupTXFsData:
 			// ignore these streams
 		default:
-			return fmt.Errorf("%s: unknown stream ID %d", name, bhdr.Id)
+			return fmt.Errorf("%s: unknown stream ID %d", name, bhdr.ID)
 		}
 	}
 
@@ -280,7 +283,7 @@ func WriteTarFileFromBackupStream(t *tar.Writer, r io.Reader, name string, size 
 			if err != nil {
 				return err
 			}
-			if bhdr.Id == winio.BackupData {
+			if bhdr.ID == backup.BackupData {
 				dataHdr = bhdr
 			}
 		}
@@ -312,7 +315,7 @@ func WriteTarFileFromBackupStream(t *tar.Writer, r io.Reader, name string, size 
 	if dataHdr != nil { //nolint:nestif // todo: reduce nesting complexity
 		// A data stream was found. Copy the data.
 		// We assume that we will either have a data stream size > 0 XOR have sparse block streams.
-		if dataHdr.Size > 0 || (dataHdr.Attributes&winio.StreamSparseAttributes) == 0 {
+		if dataHdr.Size > 0 || (dataHdr.Attributes&backup.StreamSparseAttribute) == 0 {
 			if size != dataHdr.Size {
 				return fmt.Errorf("%s: mismatch between file size %d and header size %d", name, size, dataHdr.Size)
 			}
@@ -339,9 +342,9 @@ func WriteTarFileFromBackupStream(t *tar.Writer, r io.Reader, name string, size 
 		if err != nil {
 			return err
 		}
-		switch bhdr.Id {
-		case winio.BackupAlternateData:
-			if (bhdr.Attributes & winio.StreamSparseAttributes) != 0 {
+		switch bhdr.ID {
+		case backup.BackupAlternateData:
+			if (bhdr.Attributes & backup.StreamSparseAttribute) != 0 {
 				// Unsupported for now, since the size of the alternate stream is not present
 				// in the backup stream until after the data has been read.
 				return fmt.Errorf("%s: tar of sparse alternate data streams is unsupported", name)
@@ -365,10 +368,10 @@ func WriteTarFileFromBackupStream(t *tar.Writer, r io.Reader, name string, size 
 			if err != nil {
 				return err
 			}
-		case winio.BackupEaData, winio.BackupLink, winio.BackupPropertyData, winio.BackupObjectId, winio.BackupTxfsData:
+		case backup.BackupEAData, backup.BackupLink, backup.BackupPropertyData, backup.BackupObjectID, backup.BackupTXFsData:
 			// ignore these streams
 		default:
-			return fmt.Errorf("%s: unknown stream ID %d after data", name, bhdr.Id)
+			return fmt.Errorf("%s: unknown stream ID %d after data", name, bhdr.ID)
 		}
 	}
 	return nil
@@ -376,12 +379,12 @@ func WriteTarFileFromBackupStream(t *tar.Writer, r io.Reader, name string, size 
 
 // FileInfoFromHeader retrieves basic Win32 file information from a tar header, using the additional metadata written by
 // WriteTarFileFromBackupStream.
-func FileInfoFromHeader(hdr *tar.Header) (name string, size int64, fileInfo *winio.FileBasicInfo, err error) {
+func FileInfoFromHeader(hdr *tar.Header) (name string, size int64, fileInfo *fs.FileBasicInfo, err error) {
 	name = hdr.Name
-	if hdr.Typeflag == tar.TypeReg || hdr.Typeflag == tar.TypeRegA {
+	if hdr.Typeflag == tar.TypeReg {
 		size = hdr.Size
 	}
-	fileInfo = &winio.FileBasicInfo{
+	fileInfo = &fs.FileBasicInfo{
 		LastAccessTime: windows.NsecToFiletime(hdr.AccessTime.UnixNano()),
 		LastWriteTime:  windows.NsecToFiletime(hdr.ModTime.UnixNano()),
 		ChangeTime:     windows.NsecToFiletime(hdr.ChangeTime.UnixNano()),
@@ -413,15 +416,15 @@ func FileInfoFromHeader(hdr *tar.Header) (name string, size int64, fileInfo *win
 // tar file entries in order to collect all the alternate data streams for the file, it returns the next
 // tar file that was not processed, or io.EOF is there are no more.
 func WriteBackupStreamFromTarFile(w io.Writer, t *tar.Reader, hdr *tar.Header) (*tar.Header, error) {
-	bw := winio.NewBackupStreamWriter(w)
+	bw := backup.NewStreamWriter(w)
 
 	sd, err := SecurityDescriptorFromTarHeader(hdr)
 	if err != nil {
 		return nil, err
 	}
 	if len(sd) != 0 {
-		bhdr := winio.BackupHeader{
-			Id:   winio.BackupSecurity,
+		bhdr := backup.Header{
+			ID:   backup.BackupSecurity,
 			Size: int64(len(sd)),
 		}
 		err := bw.WriteHeader(&bhdr)
@@ -439,8 +442,8 @@ func WriteBackupStreamFromTarFile(w io.Writer, t *tar.Reader, hdr *tar.Header) (
 		return nil, err
 	}
 	if len(eadata) != 0 {
-		bhdr := winio.BackupHeader{
-			Id:   winio.BackupEaData,
+		bhdr := backup.Header{
+			ID:   backup.BackupEAData,
 			Size: int64(len(eadata)),
 		}
 		err = bw.WriteHeader(&bhdr)
@@ -454,24 +457,24 @@ func WriteBackupStreamFromTarFile(w io.Writer, t *tar.Reader, hdr *tar.Header) (
 	}
 
 	if hdr.Typeflag == tar.TypeSymlink {
-		reparse := EncodeReparsePointFromTarHeader(hdr)
-		bhdr := winio.BackupHeader{
-			Id:   winio.BackupReparseData,
-			Size: int64(len(reparse)),
+		rp := EncodeReparsePointFromTarHeader(hdr)
+		bhdr := backup.Header{
+			ID:   backup.BackupReparseData,
+			Size: int64(len(rp)),
 		}
 		err := bw.WriteHeader(&bhdr)
 		if err != nil {
 			return nil, err
 		}
-		_, err = bw.Write(reparse)
+		_, err = bw.Write(rp)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	if hdr.Typeflag == tar.TypeReg || hdr.Typeflag == tar.TypeRegA {
-		bhdr := winio.BackupHeader{
-			Id:   winio.BackupData,
+	if hdr.Typeflag == tar.TypeReg {
+		bhdr := backup.Header{
+			ID:   backup.BackupData,
 			Size: hdr.Size,
 		}
 		err := bw.WriteHeader(&bhdr)
@@ -492,8 +495,8 @@ func WriteBackupStreamFromTarFile(w io.Writer, t *tar.Reader, hdr *tar.Header) (
 		if ahdr.Typeflag != tar.TypeReg || !strings.HasPrefix(ahdr.Name, hdr.Name+":") {
 			return ahdr, nil
 		}
-		bhdr := winio.BackupHeader{
-			Id:   winio.BackupAlternateData,
+		bhdr := backup.Header{
+			ID:   backup.BackupAlternateData,
 			Size: ahdr.Size,
 			Name: ahdr.Name[len(hdr.Name):] + ":$DATA",
 		}

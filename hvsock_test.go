@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/Microsoft/go-winio/internal/fs"
 	"github.com/Microsoft/go-winio/internal/socket"
 	"github.com/Microsoft/go-winio/pkg/guid"
 )
@@ -114,7 +115,7 @@ func TestHvSockListenerAddresses(t *testing.T) {
 
 	ra := rawHvsockAddr{}
 	sa := HvsockAddr{}
-	u.Must(socket.GetSockName(windows.Handle(l.sock.handle), &ra))
+	u.Must(socket.GetSockName(l.sock.Handle, &ra))
 	sa.fromRaw(&ra)
 	u.Assert(sa == *addr, fmt.Sprintf("listener local addr give: %v; want: %v", sa, addr))
 }
@@ -153,7 +154,7 @@ func TestHvSockAddresses(t *testing.T) {
 
 		localTests := []struct {
 			name     string
-			giveSock *win32File
+			giveSock *fs.File
 			wantAddr HvsockAddr
 		}{
 			{"client", cl.sock, HvsockAddr{HvsockGUIDChildren(), cla.ServiceID}},
@@ -162,7 +163,7 @@ func TestHvSockAddresses(t *testing.T) {
 			// {"server", sv.sock, _sla},
 		}
 		for _, tt := range localTests {
-			u.Must(socket.GetSockName(windows.Handle(tt.giveSock.handle), &ra))
+			u.Must(socket.GetSockName(tt.giveSock.Handle, &ra))
 			sa.fromRaw(&ra)
 			if sa != tt.wantAddr {
 				t.Errorf("%s local addr give: %v; want: %v", tt.name, sa, tt.wantAddr)
@@ -177,7 +178,7 @@ func TestHvSockAddresses(t *testing.T) {
 			{"server", sv},
 		}
 		for _, tt := range remoteTests {
-			u.Must(socket.GetPeerName(windows.Handle(tt.giveConn.sock.handle), &ra))
+			u.Must(socket.GetPeerName(tt.giveConn.sock.Handle, &ra))
 			sa.fromRaw(&ra)
 			if sa != tt.giveConn.remote {
 				t.Errorf("%s remote addr give: %v; want: %v", tt.name, sa, tt.giveConn.remote)

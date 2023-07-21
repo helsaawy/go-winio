@@ -8,7 +8,7 @@ import (
 	"github.com/Microsoft/go-winio/internal/stringbuffer"
 )
 
-//go:generate go run github.com/Microsoft/go-winio/tools/mkwinsyscall -output zsyscall_windows.go fs.go
+//go:generate go run github.com/Microsoft/go-winio/tools/mkwinsyscall -output zsyscall_windows.go *.go
 
 // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
 //sys CreateFile(name string, access AccessMask, mode FileShareMode, sa *syscall.SecurityAttributes, createmode FileCreationDisposition, attrs FileFlagOrAttribute, templatefile windows.Handle) (handle windows.Handle, err error) [failretval==windows.InvalidHandle] = CreateFileW
@@ -46,6 +46,13 @@ const (
 	// For CreateFile: "query certain metadata such as file, directory, or device attributes without accessing that file or device"
 	// https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew#parameters
 	FILE_ANY_ACCESS AccessMask = 0
+
+	GENERIC_READ           AccessMask = 0x80000000
+	GENERIC_WRITE          AccessMask = 0x40000000
+	GENERIC_EXECUTE        AccessMask = 0x20000000
+	GENERIC_ALL            AccessMask = 0x10000000
+	MAXIMUM_ALLOWED        AccessMask = 0x02000000
+	ACCESS_SYSTEM_SECURITY AccessMask = 0x01000000
 
 	// Specific Object Access
 	// from ntioapi.h
@@ -132,6 +139,17 @@ type FileFlagOrAttribute uint32
 
 //nolint:revive // SNAKE_CASE is not idiomatic in Go, but aligned with Win32 API.
 const ( // from winnt.h
+	FILE_ATTRIBUTE_READONLY      FileFlagOrAttribute = 0x00000001
+	FILE_ATTRIBUTE_HIDDEN        FileFlagOrAttribute = 0x00000002
+	FILE_ATTRIBUTE_SYSTEM        FileFlagOrAttribute = 0x00000004
+	FILE_ATTRIBUTE_DIRECTORY     FileFlagOrAttribute = 0x00000010
+	FILE_ATTRIBUTE_ARCHIVE       FileFlagOrAttribute = 0x00000020
+	FILE_ATTRIBUTE_DEVICE        FileFlagOrAttribute = 0x00000040
+	FILE_ATTRIBUTE_NORMAL        FileFlagOrAttribute = 0x00000080
+	FILE_ATTRIBUTE_TEMPORARY     FileFlagOrAttribute = 0x00000100
+	FILE_ATTRIBUTE_SPARSE_FILE   FileFlagOrAttribute = 0x00000200
+	FILE_ATTRIBUTE_REPARSE_POINT FileFlagOrAttribute = 0x00000400
+
 	FILE_FLAG_WRITE_THROUGH       FileFlagOrAttribute = 0x8000_0000
 	FILE_FLAG_OVERLAPPED          FileFlagOrAttribute = 0x4000_0000
 	FILE_FLAG_NO_BUFFERING        FileFlagOrAttribute = 0x2000_0000

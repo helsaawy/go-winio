@@ -41,16 +41,211 @@ func errnoErr(e syscall.Errno) error {
 
 var (
 	modadvapi32 = windows.NewLazySystemDLL("advapi32.dll")
+	modkernel32 = windows.NewLazySystemDLL("kernel32.dll")
 
-	procGetSecurityInfo  = modadvapi32.NewProc("GetSecurityInfo")
-	procSetEntriesInAclW = modadvapi32.NewProc("SetEntriesInAclW")
-	procSetSecurityInfo  = modadvapi32.NewProc("SetSecurityInfo")
+	procAdjustTokenPrivileges                                = modadvapi32.NewProc("AdjustTokenPrivileges")
+	procConvertSecurityDescriptorToStringSecurityDescriptorW = modadvapi32.NewProc("ConvertSecurityDescriptorToStringSecurityDescriptorW")
+	procConvertSidToStringSidW                               = modadvapi32.NewProc("ConvertSidToStringSidW")
+	procConvertStringSecurityDescriptorToSecurityDescriptorW = modadvapi32.NewProc("ConvertStringSecurityDescriptorToSecurityDescriptorW")
+	procConvertStringSidToSidW                               = modadvapi32.NewProc("ConvertStringSidToSidW")
+	procGetSecurityDescriptorLength                          = modadvapi32.NewProc("GetSecurityDescriptorLength")
+	procGetSecurityInfo                                      = modadvapi32.NewProc("GetSecurityInfo")
+	procImpersonateSelf                                      = modadvapi32.NewProc("ImpersonateSelf")
+	procLookupAccountNameW                                   = modadvapi32.NewProc("LookupAccountNameW")
+	procLookupAccountSidW                                    = modadvapi32.NewProc("LookupAccountSidW")
+	procLookupPrivilegeDisplayNameW                          = modadvapi32.NewProc("LookupPrivilegeDisplayNameW")
+	procLookupPrivilegeNameW                                 = modadvapi32.NewProc("LookupPrivilegeNameW")
+	procLookupPrivilegeValueW                                = modadvapi32.NewProc("LookupPrivilegeValueW")
+	procOpenThreadToken                                      = modadvapi32.NewProc("OpenThreadToken")
+	procRevertToSelf                                         = modadvapi32.NewProc("RevertToSelf")
+	procSetEntriesInAclW                                     = modadvapi32.NewProc("SetEntriesInAclW")
+	procSetSecurityInfo                                      = modadvapi32.NewProc("SetSecurityInfo")
+	procGetCurrentThread                                     = modkernel32.NewProc("GetCurrentThread")
+	procLocalFree                                            = modkernel32.NewProc("LocalFree")
 )
 
-func getSecurityInfo(handle syscall.Handle, objectType uint32, si uint32, ppsidOwner **uintptr, ppsidGroup **uintptr, ppDacl *uintptr, ppSacl *uintptr, ppSecurityDescriptor *uintptr) (win32err error) {
+func adjustTokenPrivileges(token windows.Token, releaseAll bool, input *byte, outputSize uint32, output *byte, requiredSize *uint32) (success bool, err error) {
+	var _p0 uint32
+	if releaseAll {
+		_p0 = 1
+	}
+	r0, _, e1 := syscall.Syscall6(procAdjustTokenPrivileges.Addr(), 6, uintptr(token), uintptr(_p0), uintptr(unsafe.Pointer(input)), uintptr(outputSize), uintptr(unsafe.Pointer(output)), uintptr(unsafe.Pointer(requiredSize)))
+	success = r0 != 0
+	if true {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func convertSecurityDescriptorToStringSecurityDescriptor(sd *byte, revision uint32, secInfo uint32, sddl **uint16, sddlSize *uint32) (err error) {
+	r1, _, e1 := syscall.Syscall6(procConvertSecurityDescriptorToStringSecurityDescriptorW.Addr(), 5, uintptr(unsafe.Pointer(sd)), uintptr(revision), uintptr(secInfo), uintptr(unsafe.Pointer(sddl)), uintptr(unsafe.Pointer(sddlSize)), 0)
+	if r1 == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func convertSidToStringSid(sid *byte, str **uint16) (err error) {
+	r1, _, e1 := syscall.Syscall(procConvertSidToStringSidW.Addr(), 2, uintptr(unsafe.Pointer(sid)), uintptr(unsafe.Pointer(str)), 0)
+	if r1 == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func convertStringSecurityDescriptorToSecurityDescriptor(str string, revision uint32, sd *uintptr, size *uint32) (err error) {
+	var _p0 *uint16
+	_p0, err = syscall.UTF16PtrFromString(str)
+	if err != nil {
+		return
+	}
+	return _convertStringSecurityDescriptorToSecurityDescriptor(_p0, revision, sd, size)
+}
+
+func _convertStringSecurityDescriptorToSecurityDescriptor(str *uint16, revision uint32, sd *uintptr, size *uint32) (err error) {
+	r1, _, e1 := syscall.Syscall6(procConvertStringSecurityDescriptorToSecurityDescriptorW.Addr(), 4, uintptr(unsafe.Pointer(str)), uintptr(revision), uintptr(unsafe.Pointer(sd)), uintptr(unsafe.Pointer(size)), 0, 0)
+	if r1 == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func convertStringSidToSid(str string, sid **byte) (err error) {
+	var _p0 *uint16
+	_p0, err = syscall.UTF16PtrFromString(str)
+	if err != nil {
+		return
+	}
+	return _convertStringSidToSid(_p0, sid)
+}
+
+func _convertStringSidToSid(str *uint16, sid **byte) (err error) {
+	r1, _, e1 := syscall.Syscall(procConvertStringSidToSidW.Addr(), 2, uintptr(unsafe.Pointer(str)), uintptr(unsafe.Pointer(sid)), 0)
+	if r1 == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func getSecurityDescriptorLength(sd uintptr) (len uint32) {
+	r0, _, _ := syscall.Syscall(procGetSecurityDescriptorLength.Addr(), 1, uintptr(sd), 0, 0)
+	len = uint32(r0)
+	return
+}
+
+func getSecurityInfo(handle windows.Handle, objectType uint32, si uint32, ppsidOwner **uintptr, ppsidGroup **uintptr, ppDacl *uintptr, ppSacl *uintptr, ppSecurityDescriptor *uintptr) (win32err error) {
 	r0, _, _ := syscall.Syscall9(procGetSecurityInfo.Addr(), 8, uintptr(handle), uintptr(objectType), uintptr(si), uintptr(unsafe.Pointer(ppsidOwner)), uintptr(unsafe.Pointer(ppsidGroup)), uintptr(unsafe.Pointer(ppDacl)), uintptr(unsafe.Pointer(ppSacl)), uintptr(unsafe.Pointer(ppSecurityDescriptor)), 0)
 	if r0 != 0 {
 		win32err = syscall.Errno(r0)
+	}
+	return
+}
+
+func impersonateSelf(level uint32) (err error) {
+	r1, _, e1 := syscall.Syscall(procImpersonateSelf.Addr(), 1, uintptr(level), 0, 0)
+	if r1 == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func lookupAccountName(systemName *uint16, accountName string, sid *byte, sidSize *uint32, refDomain *uint16, refDomainSize *uint32, sidNameUse *uint32) (err error) {
+	var _p0 *uint16
+	_p0, err = syscall.UTF16PtrFromString(accountName)
+	if err != nil {
+		return
+	}
+	return _lookupAccountName(systemName, _p0, sid, sidSize, refDomain, refDomainSize, sidNameUse)
+}
+
+func _lookupAccountName(systemName *uint16, accountName *uint16, sid *byte, sidSize *uint32, refDomain *uint16, refDomainSize *uint32, sidNameUse *uint32) (err error) {
+	r1, _, e1 := syscall.Syscall9(procLookupAccountNameW.Addr(), 7, uintptr(unsafe.Pointer(systemName)), uintptr(unsafe.Pointer(accountName)), uintptr(unsafe.Pointer(sid)), uintptr(unsafe.Pointer(sidSize)), uintptr(unsafe.Pointer(refDomain)), uintptr(unsafe.Pointer(refDomainSize)), uintptr(unsafe.Pointer(sidNameUse)), 0, 0)
+	if r1 == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func lookupAccountSid(systemName *uint16, sid *byte, name *uint16, nameSize *uint32, refDomain *uint16, refDomainSize *uint32, sidNameUse *uint32) (err error) {
+	r1, _, e1 := syscall.Syscall9(procLookupAccountSidW.Addr(), 7, uintptr(unsafe.Pointer(systemName)), uintptr(unsafe.Pointer(sid)), uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(nameSize)), uintptr(unsafe.Pointer(refDomain)), uintptr(unsafe.Pointer(refDomainSize)), uintptr(unsafe.Pointer(sidNameUse)), 0, 0)
+	if r1 == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func lookupPrivilegeDisplayName(systemName string, name *uint16, buffer *uint16, size *uint32, languageId *uint32) (err error) {
+	var _p0 *uint16
+	_p0, err = syscall.UTF16PtrFromString(systemName)
+	if err != nil {
+		return
+	}
+	return _lookupPrivilegeDisplayName(_p0, name, buffer, size, languageId)
+}
+
+func _lookupPrivilegeDisplayName(systemName *uint16, name *uint16, buffer *uint16, size *uint32, languageId *uint32) (err error) {
+	r1, _, e1 := syscall.Syscall6(procLookupPrivilegeDisplayNameW.Addr(), 5, uintptr(unsafe.Pointer(systemName)), uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(buffer)), uintptr(unsafe.Pointer(size)), uintptr(unsafe.Pointer(languageId)), 0)
+	if r1 == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func lookupPrivilegeName(systemName string, luid *uint64, buffer *uint16, size *uint32) (err error) {
+	var _p0 *uint16
+	_p0, err = syscall.UTF16PtrFromString(systemName)
+	if err != nil {
+		return
+	}
+	return _lookupPrivilegeName(_p0, luid, buffer, size)
+}
+
+func _lookupPrivilegeName(systemName *uint16, luid *uint64, buffer *uint16, size *uint32) (err error) {
+	r1, _, e1 := syscall.Syscall6(procLookupPrivilegeNameW.Addr(), 4, uintptr(unsafe.Pointer(systemName)), uintptr(unsafe.Pointer(luid)), uintptr(unsafe.Pointer(buffer)), uintptr(unsafe.Pointer(size)), 0, 0)
+	if r1 == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func lookupPrivilegeValue(systemName string, name string, luid *uint64) (err error) {
+	var _p0 *uint16
+	_p0, err = syscall.UTF16PtrFromString(systemName)
+	if err != nil {
+		return
+	}
+	var _p1 *uint16
+	_p1, err = syscall.UTF16PtrFromString(name)
+	if err != nil {
+		return
+	}
+	return _lookupPrivilegeValue(_p0, _p1, luid)
+}
+
+func _lookupPrivilegeValue(systemName *uint16, name *uint16, luid *uint64) (err error) {
+	r1, _, e1 := syscall.Syscall(procLookupPrivilegeValueW.Addr(), 3, uintptr(unsafe.Pointer(systemName)), uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(luid)))
+	if r1 == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func openThreadToken(thread syscall.Handle, accessMask uint32, openAsSelf bool, token *windows.Token) (err error) {
+	var _p0 uint32
+	if openAsSelf {
+		_p0 = 1
+	}
+	r1, _, e1 := syscall.Syscall6(procOpenThreadToken.Addr(), 4, uintptr(thread), uintptr(accessMask), uintptr(_p0), uintptr(unsafe.Pointer(token)), 0, 0)
+	if r1 == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func revertToSelf() (err error) {
+	r1, _, e1 := syscall.Syscall(procRevertToSelf.Addr(), 0, 0, 0, 0)
+	if r1 == 0 {
+		err = errnoErr(e1)
 	}
 	return
 }
@@ -63,10 +258,21 @@ func setEntriesInAcl(count uintptr, pListOfEEs uintptr, oldAcl uintptr, newAcl *
 	return
 }
 
-func setSecurityInfo(handle syscall.Handle, objectType uint32, si uint32, psidOwner uintptr, psidGroup uintptr, pDacl uintptr, pSacl uintptr) (win32err error) {
+func setSecurityInfo(handle windows.Handle, objectType uint32, si uint32, psidOwner uintptr, psidGroup uintptr, pDacl uintptr, pSacl uintptr) (win32err error) {
 	r0, _, _ := syscall.Syscall9(procSetSecurityInfo.Addr(), 7, uintptr(handle), uintptr(objectType), uintptr(si), uintptr(psidOwner), uintptr(psidGroup), uintptr(pDacl), uintptr(pSacl), 0, 0)
 	if r0 != 0 {
 		win32err = syscall.Errno(r0)
 	}
+	return
+}
+
+func getCurrentThread() (h syscall.Handle) {
+	r0, _, _ := syscall.Syscall(procGetCurrentThread.Addr(), 0, 0, 0, 0)
+	h = syscall.Handle(r0)
+	return
+}
+
+func localFree(mem uintptr) {
+	syscall.Syscall(procLocalFree.Addr(), 1, uintptr(mem), 0, 0)
 	return
 }

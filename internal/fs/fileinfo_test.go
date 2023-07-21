@@ -1,13 +1,10 @@
 //go:build windows
-// +build windows
 
-package winio
+package fs
 
 import (
 	"os"
 	"testing"
-
-	"golang.org/x/sys/windows"
 )
 
 // Checks if current matches expected. Note that AllocationSize is filesystem-specific,
@@ -109,12 +106,20 @@ func TestGetFileStandardInfo_File(t *testing.T) {
 
 func TestGetFileStandardInfo_Directory(t *testing.T) {
 	tempDir := t.TempDir()
+
 	// os.Open returns the Search Handle, not the Directory Handle
 	// See https://github.com/golang/go/issues/13738
-	f, err := OpenForBackup(tempDir, windows.GENERIC_READ, 0, windows.OPEN_EXISTING)
+	h, err := CreateFile(tempDir,
+		GENERIC_READ,
+		FILE_SHARE_NONE,
+		nil,
+		OPEN_EXISTING,
+		FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,
+		0)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("could not open %q: %v", tempDir, err)
 	}
+	f := os.NewFile(uintptr(h), tempDir)
 	defer f.Close()
 
 	expectedFileInfo := &FileStandardInfo{

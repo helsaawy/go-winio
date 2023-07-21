@@ -1,5 +1,4 @@
 //go:build windows
-// +build windows
 
 package bindfilter
 
@@ -11,13 +10,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
-//go:generate go run github.com/Microsoft/go-winio/tools/mkwinsyscall -output zsyscall_windows.go ./bind_filter.go
+//go:generate go run github.com/Microsoft/go-winio/tools/mkwinsyscall -output zsyscall_windows.go bind_filter.go
+
 //sys bfSetupFilter(jobHandle windows.Handle, flags uint32, virtRootPath string, virtTargetPath string, virtExceptions **uint16, virtExceptionPathCount uint32) (hr error) = bindfltapi.BfSetupFilter?
 //sys bfRemoveMapping(jobHandle windows.Handle, virtRootPath string)  (hr error) = bindfltapi.BfRemoveMapping?
 //sys bfGetMappings(flags uint32, jobHandle windows.Handle, virtRootPath *uint16, sid *windows.SID, bufferSize *uint32, outBuffer *byte)  (hr error) = bindfltapi.BfGetMappings?
@@ -244,7 +243,7 @@ func getFinalPath(pth string) (string, error) {
 		}
 		buf = make([]uint16, n)
 	}
-	finalPath := syscall.UTF16ToString(buf)
+	finalPath := windows.UTF16ToString(buf)
 	// We got VOLUME_NAME_DOS, we need to strip away some leading slashes.
 	// Leave unchanged if we ended up requesting VOLUME_NAME_GUID
 	if len(finalPath) > 4 && finalPath[:4] == `\\?\` && flags == 0x0 {

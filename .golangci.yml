@@ -139,6 +139,7 @@ linters-settings:
             - PWSH
             - RX
             - SACl
+            - SDDL
             - SID
             - SMB
             - TX

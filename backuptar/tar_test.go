@@ -1,5 +1,4 @@
 //go:build windows
-// +build windows
 
 package backuptar
 
@@ -12,8 +11,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
+
+	"github.com/Microsoft/go-winio/pkg/fs"
+	"github.com/Microsoft/go-winio/pkg/fs/backup"
 )
 
 func ensurePresent(t *testing.T, m map[string]string, keys ...string) {
@@ -176,12 +177,12 @@ func TestRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			bi, err := winio.GetFileBasicInfo(f)
+			bi, err := fs.GetFileBasicInfo(f)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			br := winio.NewBackupFileReader(f, true)
+			br := backup.NewFileReader(f, true)
 			defer br.Close()
 			var buf bytes.Buffer
 			tw := tar.NewWriter(&buf)
